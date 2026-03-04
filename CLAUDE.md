@@ -26,6 +26,39 @@ After any change to `prisma/schema.prisma`, run `prisma migrate dev` then `prism
 
 **GYM360** is a multi-tenant SaaS for managing artistic gymnastics gyms. Multiple gyms coexist in a single DB, isolated by `gymId` FK on every entity.
 
+### Authorization — patrón "Belongs"
+
+El control de acceso se hace con métodos explícitos en `modules/belongs/belongs.service.ts`. Cada método recibe dos IDs y retorna `Promise<boolean>`.
+
+```ts
+gymBelongsToOwner(gymId, userId)         // gym.owner.userId === userId
+trainerBelongsToGym(trainerId, gymId)    // trainer.gymId === gymId
+studentBelongsToGym(studentId, gymId)    // student.gymId === gymId
+groupBelongsToGym(groupId, gymId)        // group.gymId === gymId
+scheduleBelongsToGroup(scheduleId, groupId)
+trainerBelongsToGroup(trainerId, groupId)
+studentBelongsToGroup(studentId, groupId)
+```
+
+**Los servicios NO verifican pertenencia** — son acceso a datos puro. La verificación siempre va en el route handler, antes de llamar al servicio:
+
+```ts
+// Route Handler pattern con Belongs
+const gymId = req.nextUrl.searchParams.get("gymId")
+if (!await gymBelongsToOwner(gymId, session.user.id)) {
+  return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+}
+const students = await getStudentsByGym(gymId)  // sin ownerId — ya fue autorizado
+```
+
+Para roles distintos de OWNER, la autorización usa el belongs correspondiente a ese rol:
+```ts
+if (session.user.role === "TRAINER") {
+  const trainer = await db.trainer.findFirst({ where: { userId: session.user.id } })
+  if (!trainer || !await trainerBelongsToGroup(trainer.id, groupId)) return 403
+}
+```
+
 ### Framework versions (non-obvious)
 - **Next.js 16** — uses `proxy.ts` instead of `middleware.ts` for route protection (renamed convention)
 - **Prisma 7** — requires a driver adapter; the generated client lives at `app/generated/prisma/` (not `node_modules`). Always import from `@/app/generated/prisma/client`
@@ -93,8 +126,10 @@ lib/                        ← Infrastructure / config (no business logic)
   utils.ts                  ← cn() helper
 
 modules/                    ← Business logic, one folder per domain
+  belongs/
+    belongs.service.ts      ← Belongs checks (retornan boolean), usados en route handlers
   gyms/
-    gyms.service.ts         ← DB queries + business rules
+    gyms.service.ts         ← DB queries (sin lógica de autorización)
     gyms.schema.ts          ← Zod input validation + inferred types
   students/
   trainers/
@@ -127,18 +162,24 @@ This keeps frontend/backend cleanly separated and allows a future mobile app to 
 
 **Route Handler pattern:**
 ```ts
-// app/api/gyms/route.ts — HTTP only, no business logic here
+// app/api/students/route.ts — auth → belongs → service
 import { auth } from "@/lib/auth"
 import { NextRequest, NextResponse } from "next/server"
-import { getGymsByOwner, createGym } from "@/modules/gyms/gyms.service"
-import { createGymSchema } from "@/modules/gyms/gyms.schema"
+import { gymBelongsToOwner } from "@/modules/belongs/belongs.service"
+import { getStudentsByGym, createStudent } from "@/modules/students/students.service"
+import { createStudentSchema } from "@/modules/students/students.schema"
 
 export async function GET(req: NextRequest) {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const gyms = await getGymsByOwner(session.user.id)
-  return NextResponse.json(gyms)
+  const gymId = req.nextUrl.searchParams.get("gymId")
+  if (!gymId) return NextResponse.json({ error: "gymId required" }, { status: 400 })
+
+  if (!await gymBelongsToOwner(gymId, session.user.id))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+  return NextResponse.json(await getStudentsByGym(gymId))
 }
 
 export async function POST(req: NextRequest) {
@@ -146,11 +187,13 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const body = await req.json()
-  const parsed = createGymSchema.safeParse(body)
+  const parsed = createStudentSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
 
-  const gym = await createGym(session.user.id, parsed.data)
-  return NextResponse.json(gym, { status: 201 })
+  if (!await gymBelongsToOwner(parsed.data.gymId, session.user.id))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+  return NextResponse.json(await createStudent(parsed.data), { status: 201 })
 }
 ```
 

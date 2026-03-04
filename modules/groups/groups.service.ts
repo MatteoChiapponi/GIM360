@@ -1,9 +1,9 @@
 import { db } from "@/lib/db"
 import type { CreateGroupInput, UpdateGroupInput } from "./groups.schema"
 
-export async function getGroupsByGym(gymId: string, ownerId: string) {
+export async function getGroupsByGym(gymId: string) {
   return db.group.findMany({
-    where: { gymId, gym: { owner: { userId: ownerId } } },
+    where: { gymId },
     include: {
       trainers: { include: { trainer: true } },
       schedules: true,
@@ -13,9 +13,9 @@ export async function getGroupsByGym(gymId: string, ownerId: string) {
   })
 }
 
-export async function getGroupById(id: string, ownerId: string) {
+export async function getGroupById(id: string) {
   return db.group.findFirst({
-    where: { id, gym: { owner: { userId: ownerId } } },
+    where: { id },
     include: {
       trainers: { include: { trainer: true } },
       students: { include: { student: true } },
@@ -28,15 +28,10 @@ export async function createGroup(data: CreateGroupInput) {
   return db.group.create({ data })
 }
 
-export async function updateGroup(id: string, ownerId: string, data: UpdateGroupInput) {
-  return db.group.updateMany({
-    where: { id, gym: { owner: { userId: ownerId } } },
-    data,
-  })
+export async function updateGroup(id: string, data: UpdateGroupInput) {
+  return db.group.update({ where: { id }, data })
 }
 
-export async function deleteGroup(id: string, ownerId: string) {
-  return db.group.deleteMany({
-    where: { id, gym: { owner: { userId: ownerId } } },
-  })
+export async function deleteGroup(id: string) {
+  return db.group.delete({ where: { id } })
 }

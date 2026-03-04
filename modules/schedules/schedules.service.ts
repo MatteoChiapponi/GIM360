@@ -1,10 +1,8 @@
 import { db } from "@/lib/db"
 import type { CreateScheduleInput, UpdateScheduleInput } from "./schedules.schema"
 
-export async function getSchedulesByGroup(groupId: string, ownerId: string) {
-  return db.schedule.findMany({
-    where: { groupId, group: { gym: { owner: { userId: ownerId } } } },
-  })
+export async function getSchedulesByGroup(groupId: string) {
+  return db.schedule.findMany({ where: { groupId } })
 }
 
 export async function createSchedule(data: CreateScheduleInput) {
@@ -17,9 +15,9 @@ export async function createSchedule(data: CreateScheduleInput) {
   })
 }
 
-export async function updateSchedule(id: string, ownerId: string, data: UpdateScheduleInput) {
-  return db.schedule.updateMany({
-    where: { id, group: { gym: { owner: { userId: ownerId } } } },
+export async function updateSchedule(id: string, data: UpdateScheduleInput) {
+  return db.schedule.update({
+    where: { id },
     data: {
       ...data,
       fechaInicio: data.fechaInicio ? new Date(data.fechaInicio) : undefined,
@@ -28,8 +26,6 @@ export async function updateSchedule(id: string, ownerId: string, data: UpdateSc
   })
 }
 
-export async function deleteSchedule(id: string, ownerId: string) {
-  return db.schedule.deleteMany({
-    where: { id, group: { gym: { owner: { userId: ownerId } } } },
-  })
+export async function deleteSchedule(id: string) {
+  return db.schedule.delete({ where: { id } })
 }
