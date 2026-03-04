@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  OWNER
+  TRAINER
+  RECEPTIONIST
+}
+
+enum GymStatus {
+  ACTIVO
+  INACTIVO
+  SUSPENDIDO
+}
+
+enum ContractType {
+  POR_HORA
+  MENSUAL
+}
+
+enum MedicalClearance {
+  PENDIENTE
+  APROBADO
+  VENCIDO
+}
+
+enum DayOfWeek {
+  LUNES
+  MARTES
+  MIERCOLES
+  JUEVES
+  VIERNES
+  SABADO
+  DOMINGO
+}
+
+// ─── Modelos ─────────────────────────────────────────────────────────────────
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  hashedPassword String
+  role           UserRole
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  owner   Owner?
+  trainer Trainer?
+}
+
+model Owner {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nombre    String
+  createdAt DateTime @default(now())
+
+  gyms Gym[]
+}
+
+model Gym {
+  id        String    @id @default(cuid())
+  ownerId   String
+  owner     Owner     @relation(fields: [ownerId], references: [id])
+  nombre    String
+  direccion String?
+  telefono  String?
+  estado    GymStatus @default(ACTIVO)
+  createdAt DateTime  @default(now())
+
+  trainers      Trainer[]
+  students      Student[]
+  groups        Group[]
+  fixedExpenses FixedExpense[]
+}
+
+model FixedExpense {
+  id        String   @id @default(cuid())
+  gymId     String
+  gym       Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  nombre    String
+  monto     Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+}
+
+model Trainer {
+  id           String       @id @default(cuid())
+  userId       String?      @unique
+  user         User?        @relation(fields: [userId], references: [id])
+  gymId        String
+  gym          Gym          @relation(fields: [gymId], references: [id])
+  nombre       String
+  tipoContrato ContractType
+  estado       Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+
+  groups TrainerGroup[]
+}
+
+model Student {
+  id                 String           @id @default(cuid())
+  gymId              String
+  gym                Gym              @relation(fields: [gymId], references: [id])
+  nombre             String
+  apellido           String
+  fechaNacimiento    DateTime?
+  dni                String?
+  telefonoEmergencia String?
+  contactoEmergencia String?
+  aptoMedico         MedicalClearance @default(PENDIENTE)
+  vencimientoApto    DateTime?
+  telefono           String?
+  fechaAlta          DateTime         @default(now())
+  fechaBaja          DateTime?
+  createdAt          DateTime         @default(now())
+
+  groups StudentGroup[]
+}
+
+model Group {
+  id            String   @id @default(cuid())
+  gymId         String
+  gym           Gym      @relation(fields: [gymId], references: [id])
+  nombre        String
+  precioMensual Decimal  @db.Decimal(10, 2)
+  cupoMaximo    Int?
+  createdAt     DateTime @default(now())
+
+  trainers  TrainerGroup[]
+  students  StudentGroup[]
+  schedules Schedule[]
+}
+
+model TrainerGroup {
+  id         String   @id @default(cuid())
+  trainerId  String
+  trainer    Trainer  @relation(fields: [trainerId], references: [id])
+  groupId    String
+  group      Group    @relation(fields: [groupId], references: [id])
+  precioHora Decimal? @db.Decimal(10, 2)
+  createdAt  DateTime @default(now())
+
+  @@unique([trainerId, groupId])
+}
+
+model StudentGroup {
+  id               String   @id @default(cuid())
+  studentId        String
+  student          Student  @relation(fields: [studentId], references: [id])
+  groupId          String
+  group            Group    @relation(fields: [groupId], references: [id])
+  fechaInscripcion DateTime @default(now())
+
+  @@unique([studentId, groupId])
+}
+
+model Schedule {
+  id          String      @id @default(cuid())
+  groupId     String
+  group       Group       @relation(fields: [groupId], references: [id])
+  diasSemana  DayOfWeek[]
+  horaInicio  String // formato "HH:MM"
+  horaFin     String // formato "HH:MM"
+  fechaInicio DateTime
+  fechaFin    DateTime?
+  createdAt   DateTime    @default(now())
+}
