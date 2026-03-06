@@ -9,7 +9,7 @@ export async function getGroupsByGym(gymId: string) {
       schedules: true,
       _count: { select: { students: true } },
     },
-    orderBy: { nombre: "asc" },
+    orderBy: { name: "asc" },
   })
 }
 

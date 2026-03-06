@@ -41,3 +41,9 @@ export async function studentBelongsToGroup(studentId: string, groupId: string):
   const link = await db.studentGroup.findFirst({ where: { studentId, groupId } })
   return !!link
 }
+
+/** Verifica si el pago pertenece al gimnasio */
+export async function paymentBelongsToGym(paymentId: string, gymId: string): Promise<boolean> {
+  const payment = await db.payment.findFirst({ where: { id: paymentId, gymId } })
+  return !!payment
+}

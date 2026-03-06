@@ -16,30 +16,35 @@ enum UserRole {
 }
 
 enum GymStatus {
-  ACTIVO
-  INACTIVO
-  SUSPENDIDO
+  ACTIVE
+  INACTIVE
+  SUSPENDED
 }
 
 enum ContractType {
-  POR_HORA
-  MENSUAL
+  HOURLY
+  MONTHLY
 }
 
 enum MedicalClearance {
-  PENDIENTE
-  APROBADO
-  VENCIDO
+  PENDING
+  APPROVED
+  EXPIRED
 }
 
 enum DayOfWeek {
-  LUNES
-  MARTES
-  MIERCOLES
-  JUEVES
-  VIERNES
-  SABADO
-  DOMINGO
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
 }
 
 // ─── Modelos ─────────────────────────────────────────────────────────────────
@@ -60,7 +65,7 @@ model Owner {
   id        String   @id @default(cuid())
   userId    String   @unique
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  nombre    String
+  name      String
   createdAt DateTime @default(now())
 
   gyms Gym[]
@@ -70,24 +75,25 @@ model Gym {
   id        String    @id @default(cuid())
   ownerId   String
   owner     Owner     @relation(fields: [ownerId], references: [id])
-  nombre    String
-  direccion String?
-  telefono  String?
-  estado    GymStatus @default(ACTIVO)
+  name      String
+  address   String?
+  phone     String?
+  status    GymStatus @default(ACTIVE)
   createdAt DateTime  @default(now())
 
   trainers      Trainer[]
   students      Student[]
   groups        Group[]
   fixedExpenses FixedExpense[]
+  payments      Payment[]
 }
 
 model FixedExpense {
   id        String   @id @default(cuid())
   gymId     String
   gym       Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  nombre    String
-  monto     Decimal  @db.Decimal(10, 2)
+  name      String
+  amount    Decimal  @db.Decimal(10, 2)
   createdAt DateTime @default(now())
 }
 
@@ -97,42 +103,44 @@ model Trainer {
   user         User?        @relation(fields: [userId], references: [id])
   gymId        String
   gym          Gym          @relation(fields: [gymId], references: [id])
-  nombre       String
-  tipoContrato ContractType
-  estado       Boolean      @default(true)
+  name         String
+  contractType ContractType
+  active       Boolean      @default(true)
   createdAt    DateTime     @default(now())
 
   groups TrainerGroup[]
 }
 
 model Student {
-  id                 String           @id @default(cuid())
-  gymId              String
-  gym                Gym              @relation(fields: [gymId], references: [id])
-  nombre             String
-  apellido           String
-  fechaNacimiento    DateTime?
-  dni                String?
-  telefonoEmergencia String?
-  contactoEmergencia String?
-  aptoMedico         MedicalClearance @default(PENDIENTE)
-  vencimientoApto    DateTime?
-  telefono           String?
-  fechaAlta          DateTime         @default(now())
-  fechaBaja          DateTime?
-  createdAt          DateTime         @default(now())
+  id                   String           @id @default(cuid())
+  gymId                String
+  gym                  Gym              @relation(fields: [gymId], references: [id])
+  firstName            String
+  lastName             String
+  birthDate            DateTime?
+  nationalId           String?
+  emergencyPhone       String?
+  emergencyContact     String?
+  medicalClearance     MedicalClearance @default(PENDING)
+  medicalClearanceExpiry DateTime?
+  phone                String?
+  joinedAt             DateTime         @default(now())
+  leftAt               DateTime?
+  dueDay               Int              @default(1)
+  createdAt            DateTime         @default(now())
 
-  groups StudentGroup[]
+  groups   StudentGroup[]
+  payments Payment[]
 }
 
 model Group {
-  id            String   @id @default(cuid())
-  gymId         String
-  gym           Gym      @relation(fields: [gymId], references: [id])
-  nombre        String
-  precioMensual Decimal  @db.Decimal(10, 2)
-  cupoMaximo    Int?
-  createdAt     DateTime @default(now())
+  id           String   @id @default(cuid())
+  gymId        String
+  gym          Gym      @relation(fields: [gymId], references: [id])
+  name         String
+  monthlyPrice Decimal  @db.Decimal(10, 2)
+  maxCapacity  Int?
+  createdAt    DateTime @default(now())
 
   trainers  TrainerGroup[]
   students  StudentGroup[]
@@ -145,19 +153,19 @@ model TrainerGroup {
   trainer    Trainer  @relation(fields: [trainerId], references: [id])
   groupId    String
   group      Group    @relation(fields: [groupId], references: [id])
-  precioHora Decimal? @db.Decimal(10, 2)
+  hourlyRate Decimal? @db.Decimal(10, 2)
   createdAt  DateTime @default(now())
 
   @@unique([trainerId, groupId])
 }
 
 model StudentGroup {
-  id               String   @id @default(cuid())
-  studentId        String
-  student          Student  @relation(fields: [studentId], references: [id])
-  groupId          String
-  group            Group    @relation(fields: [groupId], references: [id])
-  fechaInscripcion DateTime @default(now())
+  id         String   @id @default(cuid())
+  studentId  String
+  student    Student  @relation(fields: [studentId], references: [id])
+  groupId    String
+  group      Group    @relation(fields: [groupId], references: [id])
+  enrolledAt DateTime @default(now())
 
   @@unique([studentId, groupId])
 }
@@ -166,10 +174,26 @@ model Schedule {
   id          String      @id @default(cuid())
   groupId     String
   group       Group       @relation(fields: [groupId], references: [id])
-  diasSemana  DayOfWeek[]
-  horaInicio  String // formato "HH:MM"
-  horaFin     String // formato "HH:MM"
-  fechaInicio DateTime
-  fechaFin    DateTime?
+  weekDays    DayOfWeek[]
+  startTime   String // format "HH:MM"
+  endTime     String // format "HH:MM"
+  startDate   DateTime
+  endDate     DateTime?
   createdAt   DateTime    @default(now())
+}
+
+model Payment {
+  id        String        @id @default(cuid())
+  gymId     String
+  gym       Gym           @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  studentId String
+  student   Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  period    DateTime      // first day of the month: 2026-04-01T00:00:00Z
+  amount    Decimal       @db.Decimal(10, 2)
+  status    PaymentStatus @default(PENDING)
+  paidAt    DateTime?
+  notes     String?
+  createdAt DateTime      @default(now())
+
+  @@unique([studentId, period])
 }

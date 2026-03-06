@@ -3,15 +3,15 @@ import { MedicalClearance } from "@/app/generated/prisma/client"
 
 export const createStudentSchema = z.object({
   gymId: z.string().min(1),
-  nombre: z.string().min(1),
-  apellido: z.string().min(1),
-  fechaNacimiento: z.string().datetime().optional(),
-  dni: z.string().optional(),
-  telefono: z.string().optional(),
-  telefonoEmergencia: z.string().optional(),
-  contactoEmergencia: z.string().optional(),
-  aptoMedico: z.nativeEnum(MedicalClearance).optional(),
-  vencimientoApto: z.string().datetime().optional(),
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  birthDate: z.string().datetime().optional(),
+  nationalId: z.string().optional(),
+  phone: z.string().optional(),
+  emergencyPhone: z.string().optional(),
+  emergencyContact: z.string().optional(),
+  medicalClearance: z.nativeEnum(MedicalClearance).optional(),
+  medicalClearanceExpiry: z.string().datetime().optional(),
 })
 
 export const updateStudentSchema = createStudentSchema.omit({ gymId: true }).partial()

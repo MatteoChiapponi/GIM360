@@ -14,7 +14,7 @@ async function main() {
 
   const existing = await db.user.findUnique({ where: { email } })
   if (existing) {
-    console.log("⚠️  Ya existe un usuario con ese email, nada que hacer.")
+    console.log("User with that email already exists, nothing to do.")
     return
   }
 
@@ -27,12 +27,12 @@ async function main() {
       role: "OWNER",
       owner: {
         create: {
-          nombre: "Admin GYM360",
+          name: "Admin GYM360",
           gyms: {
             create: {
-              nombre: "Gimnasio Demo",
-              direccion: "Av. Siempreviva 742",
-              telefono: "011-1234-5678",
+              name: "Demo Gym",
+              address: "742 Evergreen Terrace",
+              phone: "011-1234-5678",
             },
           },
         },
@@ -40,7 +40,7 @@ async function main() {
     },
   })
 
-  console.log("✅ Usuario creado:")
+  console.log("User created:")
   console.log(`   email:    ${email}`)
   console.log(`   password: ${password}`)
   console.log(`   id:       ${user.id}`)

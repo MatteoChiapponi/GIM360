@@ -2,9 +2,9 @@ import { z } from "zod"
 
 export const createGroupSchema = z.object({
   gymId: z.string().min(1),
-  nombre: z.string().min(1),
-  precioMensual: z.number().positive(),
-  cupoMaximo: z.number().int().positive().optional(),
+  name: z.string().min(1),
+  monthlyPrice: z.number().positive(),
+  maxCapacity: z.number().int().positive().optional(),
 })
 
 export const updateGroupSchema = createGroupSchema.omit({ gymId: true }).partial()

@@ -5,11 +5,11 @@ const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/
 
 export const createScheduleSchema = z.object({
   groupId: z.string().min(1),
-  diasSemana: z.array(z.nativeEnum(DayOfWeek)).min(1),
-  horaInicio: z.string().regex(timeRegex, "Formato HH:MM requerido"),
-  horaFin: z.string().regex(timeRegex, "Formato HH:MM requerido"),
-  fechaInicio: z.string().datetime(),
-  fechaFin: z.string().datetime().optional(),
+  weekDays: z.array(z.nativeEnum(DayOfWeek)).min(1),
+  startTime: z.string().regex(timeRegex, "Format HH:MM required"),
+  endTime: z.string().regex(timeRegex, "Format HH:MM required"),
+  startDate: z.string().datetime(),
+  endDate: z.string().datetime().optional(),
 })
 
 export const updateScheduleSchema = createScheduleSchema.omit({ groupId: true }).partial()

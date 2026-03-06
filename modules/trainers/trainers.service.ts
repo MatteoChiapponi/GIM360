@@ -4,7 +4,7 @@ import type { CreateTrainerInput, UpdateTrainerInput } from "./trainers.schema"
 export async function getTrainersByGym(gymId: string) {
   return db.trainer.findMany({
     where: { gymId },
-    orderBy: { nombre: "asc" },
+    orderBy: { name: "asc" },
   })
 }
 
@@ -23,7 +23,7 @@ export async function updateTrainer(id: string, data: UpdateTrainerInput) {
   return db.trainer.update({ where: { id }, data })
 }
 
-// Soft delete: el trainer tiene estado Boolean
+// Soft delete: trainer has active Boolean
 export async function deleteTrainer(id: string) {
-  return db.trainer.update({ where: { id }, data: { estado: false } })
+  return db.trainer.update({ where: { id }, data: { active: false } })
 }

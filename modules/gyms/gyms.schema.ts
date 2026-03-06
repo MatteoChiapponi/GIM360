@@ -1,9 +1,9 @@
 import { z } from "zod"
 
 export const createGymSchema = z.object({
-  nombre: z.string().min(1),
-  direccion: z.string().optional(),
-  telefono: z.string().optional(),
+  name: z.string().min(1),
+  address: z.string().optional(),
+  phone: z.string().optional(),
 })
 
 export const updateGymSchema = createGymSchema.partial()

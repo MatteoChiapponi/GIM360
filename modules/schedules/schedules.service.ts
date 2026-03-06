@@ -9,8 +9,8 @@ export async function createSchedule(data: CreateScheduleInput) {
   return db.schedule.create({
     data: {
       ...data,
-      fechaInicio: new Date(data.fechaInicio),
-      fechaFin: data.fechaFin ? new Date(data.fechaFin) : undefined,
+      startDate: new Date(data.startDate),
+      endDate: data.endDate ? new Date(data.endDate) : undefined,
     },
   })
 }
@@ -20,8 +20,8 @@ export async function updateSchedule(id: string, data: UpdateScheduleInput) {
     where: { id },
     data: {
       ...data,
-      fechaInicio: data.fechaInicio ? new Date(data.fechaInicio) : undefined,
-      fechaFin: data.fechaFin ? new Date(data.fechaFin) : undefined,
+      startDate: data.startDate ? new Date(data.startDate) : undefined,
+      endDate: data.endDate ? new Date(data.endDate) : undefined,
     },
   })
 }

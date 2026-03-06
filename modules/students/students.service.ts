@@ -4,7 +4,7 @@ import type { CreateStudentInput, UpdateStudentInput } from "./students.schema"
 export async function getStudentsByGym(gymId: string) {
   return db.student.findMany({
     where: { gymId },
-    orderBy: { apellido: "asc" },
+    orderBy: { lastName: "asc" },
   })
 }
 
@@ -19,8 +19,8 @@ export async function createStudent(data: CreateStudentInput) {
   return db.student.create({
     data: {
       ...data,
-      fechaNacimiento: data.fechaNacimiento ? new Date(data.fechaNacimiento) : undefined,
-      vencimientoApto: data.vencimientoApto ? new Date(data.vencimientoApto) : undefined,
+      birthDate: data.birthDate ? new Date(data.birthDate) : undefined,
+      medicalClearanceExpiry: data.medicalClearanceExpiry ? new Date(data.medicalClearanceExpiry) : undefined,
     },
   })
 }
@@ -30,8 +30,8 @@ export async function updateStudent(id: string, data: UpdateStudentInput) {
     where: { id },
     data: {
       ...data,
-      fechaNacimiento: data.fechaNacimiento ? new Date(data.fechaNacimiento) : undefined,
-      vencimientoApto: data.vencimientoApto ? new Date(data.vencimientoApto) : undefined,
+      birthDate: data.birthDate ? new Date(data.birthDate) : undefined,
+      medicalClearanceExpiry: data.medicalClearanceExpiry ? new Date(data.medicalClearanceExpiry) : undefined,
     },
   })
 }
