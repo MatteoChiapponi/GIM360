@@ -2,6 +2,7 @@ import NextAuth from "next-auth"
 import Credentials from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { db } from "@/lib/db"
+import type { UserRole } from "@/app/generated/prisma/client"
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
@@ -35,14 +36,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     jwt({ token, user }) {
       if (user) {
         token.id = user.id
-        token.role = (user as { role: string }).role
+        token.role = (user as { role: UserRole }).role
       }
       return token
     },
     session({ session, token }) {
       if (token) {
         session.user.id = token.id as string
-        session.user.role = token.role as string
+        session.user.role = token.role as UserRole
       }
       return session
     },
