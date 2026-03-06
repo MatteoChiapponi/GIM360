@@ -45,6 +45,7 @@ enum DayOfWeek {
 enum PaymentStatus {
   PENDING
   PAID
+  EXPIRED
 }
 
 // ─── Modelos ─────────────────────────────────────────────────────────────────

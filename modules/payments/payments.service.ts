@@ -52,9 +52,36 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
   return getPaymentsByGym(gymId, period)
 }
 
-/** Returns all payments for a gym in a given period, with student info */
+/** Expires any PENDING payments whose due date has already passed */
+async function expireOverduePayments(gymId: string, period: string) {
+  const periodDate = parsePeriod(period)
+  const [year, month] = period.split("-").map(Number)
+  const now = new Date()
+
+  const pending = await db.payment.findMany({
+    where: { gymId, period: periodDate, status: "PENDING" },
+    include: { student: { select: { dueDay: true } } },
+  })
+
+  const toExpire = pending.filter((p) => {
+    const lastDay = new Date(year, month, 0).getDate()
+    const due = new Date(year, month - 1, Math.min(p.student.dueDay, lastDay))
+    return due < now
+  })
+
+  if (toExpire.length > 0) {
+    await db.payment.updateMany({
+      where: { id: { in: toExpire.map((p) => p.id) } },
+      data: { status: "EXPIRED" },
+    })
+  }
+}
+
+/** Returns all payments for a gym in a given period, with student info.
+ *  Automatically expires overdue PENDING payments before returning. */
 export async function getPaymentsByGym(gymId: string, period: string) {
   const periodDate = parsePeriod(period)
+  await expireOverduePayments(gymId, period)
   return db.payment.findMany({
     where: { gymId, period: periodDate },
     ...paymentWithStudent,

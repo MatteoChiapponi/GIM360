@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npx prisma migrate dev --name init-entities)",
       "Bash(npx prisma generate)",
-      "Bash(npm install zod)"
+      "Bash(npm install zod)",
+      "Bash(ls:*)"
     ]
   }
 }
