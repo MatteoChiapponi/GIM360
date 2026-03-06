@@ -1,6 +1,10 @@
 import { db } from "@/lib/db"
 import type { CreateTrainerInput, UpdateTrainerInput } from "./trainers.schema"
 
+export async function getTrainerByUserId(userId: string) {
+  return db.trainer.findFirst({ where: { userId } })
+}
+
 export async function getTrainersByGym(gymId: string) {
   return db.trainer.findMany({
     where: { gymId },

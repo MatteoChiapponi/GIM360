@@ -12,35 +12,41 @@ async function main() {
   const email = "admin@gym360.com"
   const password = "admin1234"
 
-  const existing = await db.user.findUnique({ where: { email } })
-  if (existing) {
-    console.log("User with that email already exists, nothing to do.")
-    return
-  }
-
   const hashedPassword = await bcrypt.hash(password, 10)
 
-  const user = await db.user.create({
-    data: {
+  // Upsert user
+  const user = await db.user.upsert({
+    where: { email },
+    update: {},
+    create: {
       email,
       hashedPassword,
       role: "OWNER",
-      owner: {
-        create: {
-          name: "Admin GYM360",
-          gyms: {
-            create: {
-              name: "Demo Gym",
-              address: "742 Evergreen Terrace",
-              phone: "011-1234-5678",
-            },
-          },
-        },
-      },
+      owner: { create: { name: "Admin GYM360" } },
     },
+    include: { owner: true },
   })
 
-  console.log("User created:")
+  const owner = user.owner!
+
+  // Seed gyms con distintos estados
+  const gyms = [
+    { name: "GYM360 Centro",   address: "Av. Corrientes 1234", phone: "011-1111-1111", status: "ACTIVE"    },
+    { name: "GYM360 Palermo",  address: "Av. Santa Fe 5678",   phone: "011-2222-2222", status: "SUSPENDED" },
+    { name: "GYM360 Belgrano", address: "Cabildo 900",         phone: "011-3333-3333", status: "INACTIVE"  },
+  ] as const
+
+  for (const gym of gyms) {
+    const existing = await db.gym.findFirst({ where: { ownerId: owner.id, name: gym.name } })
+    if (!existing) {
+      await db.gym.create({ data: { ...gym, ownerId: owner.id } })
+      console.log(`   gym creado: ${gym.name} (${gym.status})`)
+    } else {
+      console.log(`   gym ya existe: ${gym.name} (${existing.status})`)
+    }
+  }
+
+  console.log("\nOwner listo:")
   console.log(`   email:    ${email}`)
   console.log(`   password: ${password}`)
   console.log(`   id:       ${user.id}`)

@@ -47,3 +47,9 @@ export async function paymentBelongsToGym(paymentId: string, gymId: string): Pro
   const payment = await db.payment.findFirst({ where: { id: paymentId, gymId } })
   return !!payment
 }
+
+/** Verifica si el gimnasio está activo (status === ACTIVE) */
+export async function gymIsActive(gymId: string): Promise<boolean> {
+  const gym = await db.gym.findFirst({ where: { id: gymId, status: "ACTIVE" } })
+  return !!gym
+}
