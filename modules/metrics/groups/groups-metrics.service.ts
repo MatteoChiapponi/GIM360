@@ -1,0 +1,151 @@
+import { db } from "@/lib/db"
+import type { MetricsQueryInput } from "../metrics.schema"
+
+/** Parses "YYYY-MM" into the first-day-of-month Date (UTC) */
+function parsePeriod(period: string): Date {
+  const [year, month] = period.split("-").map(Number)
+  return new Date(Date.UTC(year, month - 1, 1))
+}
+
+function parseMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number)
+  return h * 60 + m
+}
+
+/**
+ * Estimates monthly hours for a set of schedules using the 4.33 weeks/month approximation.
+ * Formula per schedule: sessionDuration (hrs) × weekDays.length × 4.33
+ */
+function computeMonthlyHours(
+  schedules: { weekDays: string[]; startTime: string; endTime: string }[]
+): number {
+  return schedules.reduce((total, s) => {
+    const durationHrs = (parseMinutes(s.endTime) - parseMinutes(s.startTime)) / 60
+    return total + durationHrs * s.weekDays.length * 4.33
+  }, 0)
+}
+
+export type GroupMetrics = {
+  groupId: string
+  groupName: string
+  monthlyPrice: number
+  activeStudents: number
+  maxCapacity: number | null
+  /** activeStudents / maxCapacity. null if group has no maxCapacity set. */
+  occupancyRate: number | null
+  /** activeStudents × monthlyPrice */
+  projectedRevenue: number
+  /** Sum of PAID payment amounts attributed proportionally to this group for the period */
+  collectedRevenue: number
+  /** Estimated monthly hours across all schedules for this group */
+  monthlyHours: number
+  /** Sum of hourlyRate × monthlyHours for all trainers in this group */
+  trainerCost: number
+  /** collectedRevenue - trainerCost */
+  margin: number
+  /**
+   * Warning shown when one or more trainers are on MONTHLY contracts.
+   * The schema has no salary field, so cost is estimated as hourlyRate × monthlyHours.
+   */
+  trainerCostNote: string | null
+}
+
+/**
+ * Returns profitability metrics per group for a given gym and billing period.
+ * Only OWNER-accessible — route handler enforces authorization.
+ */
+export async function getGroupMetrics(input: MetricsQueryInput): Promise<GroupMetrics[]> {
+  const periodDate = parsePeriod(input.period)
+
+  const [groups, paidPayments] = await Promise.all([
+    db.group.findMany({
+      where: { gymId: input.gymId },
+      include: {
+        students: {
+          where: { student: { leftAt: null } },
+          include: {
+            student: { select: { id: true } },
+          },
+        },
+        trainers: {
+          include: {
+            trainer: { select: { id: true, name: true, contractType: true } },
+          },
+        },
+        schedules: {
+          select: { weekDays: true, startTime: true, endTime: true },
+        },
+      },
+      orderBy: { name: "asc" },
+    }),
+
+    // Load all PAID payments for the gym/period with the student's group enrollments
+    // so we can distribute each payment proportionally across the student's groups.
+    db.payment.findMany({
+      where: { gymId: input.gymId, period: periodDate, status: "PAID" },
+      include: {
+        student: {
+          include: {
+            groups: {
+              include: {
+                group: { select: { id: true, monthlyPrice: true } },
+              },
+            },
+          },
+        },
+      },
+    }),
+  ])
+
+  // Build a map: groupId → collected revenue (proportional share of PAID payments)
+  const collectedByGroup = new Map<string, number>()
+
+  for (const payment of paidPayments) {
+    const studentGroups = payment.student.groups
+    const totalMonthlyPrice = studentGroups.reduce(
+      (sum, sg) => sum + Number(sg.group.monthlyPrice),
+      0
+    )
+    if (totalMonthlyPrice === 0) continue
+
+    for (const sg of studentGroups) {
+      const share =
+        (Number(sg.group.monthlyPrice) / totalMonthlyPrice) * Number(payment.amount)
+      collectedByGroup.set(sg.group.id, (collectedByGroup.get(sg.group.id) ?? 0) + share)
+    }
+  }
+
+  return groups.map((group) => {
+    const activeStudents = group.students.length
+    const monthlyPrice = Number(group.monthlyPrice)
+    const monthlyHours = computeMonthlyHours(group.schedules)
+
+    const hasMonthlyTrainer = group.trainers.some(
+      (tg) => tg.trainer.contractType === "MONTHLY"
+    )
+
+    const trainerCost = group.trainers.reduce((sum, tg) => {
+      const rate = tg.hourlyRate ? Number(tg.hourlyRate) : 0
+      return sum + rate * monthlyHours
+    }, 0)
+
+    const collectedRevenue = collectedByGroup.get(group.id) ?? 0
+
+    return {
+      groupId: group.id,
+      groupName: group.name,
+      monthlyPrice,
+      activeStudents,
+      maxCapacity: group.maxCapacity ?? null,
+      occupancyRate: group.maxCapacity ? activeStudents / group.maxCapacity : null,
+      projectedRevenue: activeStudents * monthlyPrice,
+      collectedRevenue,
+      monthlyHours,
+      trainerCost,
+      margin: collectedRevenue - trainerCost,
+      trainerCostNote: hasMonthlyTrainer
+        ? "One or more trainers are on MONTHLY contracts. Cost is estimated as hourlyRate × monthly hours; actual salary may differ."
+        : null,
+    }
+  })
+}
