@@ -53,13 +53,40 @@ async function main() {
   const gym = owner.owner!.gyms[0]
   console.log(`✅ Owner: ${owner.email}  /  Gym: ${gym.name} (${gym.id})`)
 
+  // ── Cleanup (idempotent re-runs) ───────────────────────────────────────────
+
+  await db.payment.deleteMany({ where: { gymId: gym.id } })
+  await db.studentGroup.deleteMany({ where: { student: { gymId: gym.id } } })
+  await db.trainerGroup.deleteMany({ where: { trainer: { gymId: gym.id } } })
+  await db.schedule.deleteMany({ where: { group: { gymId: gym.id } } })
+  await db.student.deleteMany({ where: { gymId: gym.id } })
+  await db.trainer.deleteMany({ where: { gymId: gym.id } })
+  await db.group.deleteMany({ where: { gymId: gym.id } })
+  await db.fixedExpense.deleteMany({ where: { gymId: gym.id } })
+
+  console.log("🧹 Cleaned up existing gym data")
+
+  // ── Fixed Expenses ─────────────────────────────────────────────────────────
+
+  await db.fixedExpense.createMany({
+    data: [
+      { gymId: gym.id, name: "Alquiler", amount: 120000 },
+      { gymId: gym.id, name: "Servicios (luz, agua, gas)", amount: 25000 },
+      { gymId: gym.id, name: "Internet y telefonía", amount: 8000 },
+      { gymId: gym.id, name: "Limpieza y mantenimiento", amount: 15000 },
+      { gymId: gym.id, name: "Seguro", amount: 12000 },
+    ],
+  })
+
+  console.log("✅ Fixed expenses: Alquiler, Servicios, Internet, Limpieza, Seguro ($180.000 total)")
+
   // ── Groups ─────────────────────────────────────────────────────────────────
 
   const [groupBeginners, groupIntermediate, groupAdvanced] = await Promise.all([
     db.group.create({
       data: {
         gymId: gym.id,
-        name: "Beginners",
+        name: "Principiantes",
         monthlyPrice: 15000,
         maxCapacity: 12,
         schedules: {
@@ -75,7 +102,7 @@ async function main() {
     db.group.create({
       data: {
         gymId: gym.id,
-        name: "Intermediate",
+        name: "Intermedio",
         monthlyPrice: 18000,
         maxCapacity: 10,
         schedules: {
@@ -91,7 +118,7 @@ async function main() {
     db.group.create({
       data: {
         gymId: gym.id,
-        name: "Advanced",
+        name: "Avanzado",
         monthlyPrice: 22000,
         maxCapacity: 8,
         schedules: {
@@ -134,7 +161,7 @@ async function main() {
     }),
   ])
 
-  console.log(`✅ Trainers: ${trainerLaura.name}, ${trainerMarcelo.name}`)
+  console.log(`✅ Trainers: ${trainerLaura.name} (MONTHLY, Principiantes), ${trainerMarcelo.name} (HOURLY $3.500/$4.000)`)
 
   // ── Students ───────────────────────────────────────────────────────────────
   // Mix of situations:
@@ -143,7 +170,7 @@ async function main() {
   //   - One inactive student (leftAt set)
 
   const studentsData = [
-    // Beginners only — pays on the 5th
+    // Principiantes only — pays on the 5th
     {
       firstName: "Ana",
       lastName: "García",
@@ -152,7 +179,7 @@ async function main() {
       dueDay: 5,
       groups: [groupBeginners.id],
     },
-    // Beginners only — pays on the 12th
+    // Principiantes only — pays on the 12th
     {
       firstName: "Carlos",
       lastName: "López",
@@ -161,7 +188,7 @@ async function main() {
       dueDay: 12,
       groups: [groupBeginners.id],
     },
-    // Intermediate only — pays on the 1st
+    // Intermedio only — pays on the 1st
     {
       firstName: "Sofía",
       lastName: "Martínez",
@@ -171,7 +198,7 @@ async function main() {
       dueDay: 1,
       groups: [groupIntermediate.id],
     },
-    // Intermediate only — pays on the 20th
+    // Intermedio only — pays on the 20th
     {
       firstName: "Tomás",
       lastName: "Fernández",
@@ -180,7 +207,7 @@ async function main() {
       dueDay: 20,
       groups: [groupIntermediate.id],
     },
-    // Advanced only — pays on the 15th
+    // Avanzado only — pays on the 15th
     {
       firstName: "Valentina",
       lastName: "Rodríguez",
@@ -190,7 +217,7 @@ async function main() {
       dueDay: 15,
       groups: [groupAdvanced.id],
     },
-    // Beginners + Intermediate (two groups) — pays on the 3rd
+    // Principiantes + Intermedio (two groups) — pays on the 3rd
     {
       firstName: "Lucas",
       lastName: "Sánchez",
@@ -199,7 +226,7 @@ async function main() {
       dueDay: 3,
       groups: [groupBeginners.id, groupIntermediate.id],
     },
-    // Beginners + Advanced (two groups) — pays on the 8th
+    // Principiantes + Avanzado (two groups) — pays on the 8th
     {
       firstName: "Camila",
       lastName: "Torres",
@@ -208,7 +235,7 @@ async function main() {
       dueDay: 8,
       groups: [groupBeginners.id, groupAdvanced.id],
     },
-    // Inactive student (leftAt set) — should NOT appear in generated payments
+    // Inactive student (leftAt set) — should NOT appear in active metrics
     {
       firstName: "Diego",
       lastName: "Morales",
@@ -240,27 +267,27 @@ async function main() {
   console.log(`✅ Students: ${students.map((s) => s.firstName).join(", ")}`)
 
   // ── Payments ───────────────────────────────────────────────────────────────
-  // Generate payments for January and February 2026.
-  // Manually set a mix of statuses to simulate real state:
-  //   January: most paid, a couple pending/expired
-  //   February: mix of paid and pending
-  //   March: not generated yet (to test lazy generation)
+  // Generates payments for January, February, and March 2026.
+  // January: mostly paid (simulates closed month)
+  // February: mix of paid and pending
+  // March: realistic current state (some paid, some pending, some expired)
 
   const activeStudents = students.filter((s) => !s.leftAt)
 
+  // Compute each student's total monthly fee (sum of all enrolled groups)
   const monthlyAmounts: Record<string, number> = {}
   for (const s of activeStudents) {
     const studentData = studentsData.find(
       (d) => d.firstName === s.firstName && d.lastName === s.lastName
     )!
-    const total = await db.studentGroup.findMany({
+    const enrollments = await db.studentGroup.findMany({
       where: { studentId: s.id },
       include: { group: true },
     })
-    monthlyAmounts[s.id] = total.reduce((sum, sg) => sum + Number(sg.group.monthlyPrice), 0)
+    monthlyAmounts[s.id] = enrollments.reduce((sum, sg) => sum + Number(sg.group.monthlyPrice), 0)
   }
 
-  // January 2026
+  // January 2026 — closed month, almost all paid
   const januaryPayments = [
     { student: "Ana",       status: "PAID",    paidAt: date(2026, 1, 5)  },
     { student: "Carlos",    status: "PAID",    paidAt: date(2026, 1, 14) },
@@ -271,10 +298,10 @@ async function main() {
     { student: "Camila",    status: "PAID",    paidAt: date(2026, 1, 10) },
   ] as const
 
-  // February 2026
+  // February 2026 — past month, mix of paid and pending
   const februaryPayments = [
     { student: "Ana",       status: "PAID",    paidAt: date(2026, 2, 6)  },
-    { student: "Carlos",    status: "PENDING", paidAt: null              },
+    { student: "Carlos",    status: "PAID",    paidAt: date(2026, 2, 14) },
     { student: "Sofía",     status: "PAID",    paidAt: date(2026, 2, 2)  },
     { student: "Tomás",     status: "PAID",    paidAt: date(2026, 2, 21) },
     { student: "Valentina", status: "PENDING", paidAt: null              },
@@ -282,9 +309,21 @@ async function main() {
     { student: "Camila",    status: "PENDING", paidAt: null              },
   ] as const
 
+  // March 2026 — current month, realistic in-progress state
+  const marchPayments = [
+    { student: "Ana",       status: "PAID",    paidAt: date(2026, 3, 5)  },
+    { student: "Carlos",    status: "PENDING", paidAt: null              },
+    { student: "Sofía",     status: "PAID",    paidAt: date(2026, 3, 2)  },
+    { student: "Tomás",     status: "PENDING", paidAt: null              },
+    { student: "Valentina", status: "PAID",    paidAt: date(2026, 3, 15) },
+    { student: "Lucas",     status: "PAID",    paidAt: date(2026, 3, 4)  },
+    { student: "Camila",    status: "EXPIRED", paidAt: null              },
+  ] as const
+
   for (const [period, entries] of [
     [firstOfMonth(2026, 1), januaryPayments],
     [firstOfMonth(2026, 2), februaryPayments],
+    [firstOfMonth(2026, 3), marchPayments],
   ] as const) {
     for (const entry of entries) {
       const student = students.find((s) => s.firstName === entry.student)!
@@ -301,13 +340,22 @@ async function main() {
     }
   }
 
-  console.log(`✅ Payments: January (7 records) + February (7 records)`)
-  console.log(`\n📋 Summary`)
-  console.log(`   Gym ID:      ${gym.id}`)
-  console.log(`   Login:       admin@gym360.com / admin1234`)
-  console.log(`   Groups:      Beginners ($15k), Intermediate ($18k), Advanced ($22k)`)
-  console.log(`   Students:    7 active + 1 inactive (Diego)`)
-  console.log(`   March:       no payments generated yet — test lazy generation via POST /api/payments`)
+  console.log(`✅ Payments: Enero (7) + Febrero (7) + Marzo (7 registros)`)
+
+  // ── Summary ────────────────────────────────────────────────────────────────
+
+  console.log(`
+📋 Resumen
+   Gym ID:      ${gym.id}
+   Login:       admin@gym360.com / admin1234
+   Grupos:      Principiantes ($15k), Intermedio ($18k), Avanzado ($22k)
+   Entrenadores: Laura (MONTHLY, Principiantes) · Marcelo (HOURLY, Intermedio+Avanzado)
+   Alumnos:     7 activos + 1 baja (Diego)
+   Gastos fijos: $180.000/mes (alquiler, servicios, internet, limpieza, seguro)
+   Pagos:       Enero (casi todo pago) · Febrero (mix) · Marzo (en curso)
+
+   👉 Probá las métricas con period=2026-01, 2026-02 o 2026-03
+  `)
 }
 
 main()
