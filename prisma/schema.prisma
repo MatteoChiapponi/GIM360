@@ -87,6 +87,8 @@ model Gym {
   groups        Group[]
   fixedExpenses FixedExpense[]
   payments      Payment[]
+
+  @@index([ownerId])
 }
 
 model FixedExpense {
@@ -96,6 +98,8 @@ model FixedExpense {
   name      String
   amount    Decimal  @db.Decimal(10, 2)
   createdAt DateTime @default(now())
+
+  @@index([gymId])
 }
 
 model Trainer {
@@ -110,6 +114,8 @@ model Trainer {
   createdAt    DateTime     @default(now())
 
   groups TrainerGroup[]
+
+  @@index([gymId])
 }
 
 model Student {
@@ -132,6 +138,8 @@ model Student {
 
   groups   StudentGroup[]
   payments Payment[]
+
+  @@index([gymId])
 }
 
 model Group {
@@ -146,6 +154,8 @@ model Group {
   trainers  TrainerGroup[]
   students  StudentGroup[]
   schedules Schedule[]
+
+  @@index([gymId])
 }
 
 model TrainerGroup {
@@ -158,6 +168,7 @@ model TrainerGroup {
   createdAt  DateTime @default(now())
 
   @@unique([trainerId, groupId])
+  @@index([groupId])
 }
 
 model StudentGroup {
@@ -169,6 +180,7 @@ model StudentGroup {
   enrolledAt DateTime @default(now())
 
   @@unique([studentId, groupId])
+  @@index([groupId])
 }
 
 model Schedule {
@@ -181,6 +193,8 @@ model Schedule {
   startDate   DateTime
   endDate     DateTime?
   createdAt   DateTime    @default(now())
+
+  @@index([groupId])
 }
 
 model Payment {
@@ -197,4 +211,5 @@ model Payment {
   createdAt DateTime      @default(now())
 
   @@unique([studentId, period])
+  @@index([gymId, period, status])
 }

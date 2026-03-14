@@ -217,3 +217,14 @@ ALTER TABLE "Payment" ADD CONSTRAINT "Payment_gymId_fkey" FOREIGN KEY ("gymId") 
 
 -- AddForeignKey
 ALTER TABLE "Payment" ADD CONSTRAINT "Payment_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Student"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- CreateIndex (Performance)
+CREATE INDEX "Gym_ownerId_idx" ON "Gym"("ownerId");
+CREATE INDEX "FixedExpense_gymId_idx" ON "FixedExpense"("gymId");
+CREATE INDEX "Trainer_gymId_idx" ON "Trainer"("gymId");
+CREATE INDEX "Student_gymId_idx" ON "Student"("gymId");
+CREATE INDEX "Group_gymId_idx" ON "Group"("gymId");
+CREATE INDEX "TrainerGroup_groupId_idx" ON "TrainerGroup"("groupId");
+CREATE INDEX "StudentGroup_groupId_idx" ON "StudentGroup"("groupId");
+CREATE INDEX "Schedule_groupId_idx" ON "Schedule"("groupId");
+CREATE INDEX "Payment_gymId_period_status_idx" ON "Payment"("gymId", "period", "status");
