@@ -36,6 +36,10 @@ export async function updateStudent(id: string, data: UpdateStudentInput) {
   })
 }
 
+export async function deactivateStudent(id: string) {
+  return db.student.update({ where: { id }, data: { leftAt: new Date() } })
+}
+
 export async function deleteStudent(id: string) {
   return db.student.delete({ where: { id } })
 }

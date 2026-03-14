@@ -26,33 +26,35 @@ export default async function GymLayout({
     <div className="min-h-screen bg-[#F7F6F3]">
       {/* Sticky nav bar */}
       <header className="sticky top-0 z-10 border-b border-[#E5E4E0] bg-white">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
-          {/* Brand + gym name (gym name hidden on mobile to save space) */}
-          <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          {/* Top row: brand + desktop nav + back */}
+          <div className="h-14 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
+              <Link
+                href="/dashboard"
+                className="text-xs font-semibold tracking-[0.2em] uppercase text-[#111110]"
+              >
+                GYM360
+              </Link>
+              {gym?.name && (
+                <>
+                  <span className="text-[#D5D4D0] text-sm select-none hidden sm:inline">/</span>
+                  <span className="text-sm text-[#68685F] font-medium truncate hidden sm:inline max-w-[160px]">{gym.name}</span>
+                </>
+              )}
+            </div>
+
+            {/* Nav links — desktop inline / mobile hamburger (handled inside NavLinks) */}
+            <NavLinks gymId={gymId} />
+
             <Link
               href="/dashboard"
-              className="text-xs font-semibold tracking-[0.2em] uppercase text-[#111110]"
+              className="text-xs font-medium text-[#A5A49D] hover:text-[#111110] transition-colors flex-shrink-0 min-h-[44px] flex items-center"
             >
-              GYM360
+              ← Volver
             </Link>
-            {gym?.name && (
-              <>
-                <span className="text-[#D5D4D0] text-sm select-none hidden sm:inline">/</span>
-                <span className="text-sm text-[#68685F] font-medium truncate hidden sm:inline max-w-[160px]">{gym.name}</span>
-              </>
-            )}
           </div>
 
-          {/* Nav links */}
-          <NavLinks gymId={gymId} />
-
-          {/* Back link */}
-          <Link
-            href="/dashboard"
-            className="text-xs font-medium text-[#A5A49D] hover:text-[#111110] transition-colors flex-shrink-0 min-h-[44px] flex items-center"
-          >
-            ← Volver
-          </Link>
         </div>
       </header>
 

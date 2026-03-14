@@ -35,3 +35,25 @@ export async function updateGroup(id: string, data: UpdateGroupInput) {
 export async function deleteGroup(id: string) {
   return db.group.delete({ where: { id } })
 }
+
+export async function enrollStudent(groupId: string, studentId: string) {
+  return db.studentGroup.create({ data: { groupId, studentId } })
+}
+
+export async function unenrollStudent(groupId: string, studentId: string) {
+  return db.studentGroup.delete({
+    where: { studentId_groupId: { studentId, groupId } },
+  })
+}
+
+export async function assignTrainer(groupId: string, trainerId: string, hourlyRate?: number) {
+  return db.trainerGroup.create({
+    data: { groupId, trainerId, ...(hourlyRate !== undefined ? { hourlyRate } : {}) },
+  })
+}
+
+export async function removeTrainer(groupId: string, trainerId: string) {
+  return db.trainerGroup.delete({
+    where: { trainerId_groupId: { trainerId, groupId } },
+  })
+}

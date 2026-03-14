@@ -48,6 +48,12 @@ export async function paymentBelongsToGym(paymentId: string, gymId: string): Pro
   return !!payment
 }
 
+/** Verifica si el gasto fijo pertenece al gimnasio */
+export async function expenseBelongsToGym(expenseId: string, gymId: string): Promise<boolean> {
+  const expense = await db.fixedExpense.findFirst({ where: { id: expenseId, gymId } })
+  return !!expense
+}
+
 /** Verifica si el gimnasio está activo (status === ACTIVE) */
 export async function gymIsActive(gymId: string): Promise<boolean> {
   const gym = await db.gym.findFirst({ where: { id: gymId, status: "ACTIVE" } })
