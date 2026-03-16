@@ -5,7 +5,8 @@
       "Bash(npx prisma generate)",
       "Bash(npm install zod)",
       "Bash(ls:*)",
-      "Bash(npx tsc --noEmit 2>&1)"
+      "Bash(npx tsc --noEmit 2>&1)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

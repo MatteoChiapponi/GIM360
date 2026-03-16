@@ -8,6 +8,14 @@ export async function getTrainerByUserId(userId: string) {
 export async function getTrainersByGym(gymId: string) {
   return db.trainer.findMany({
     where: { gymId },
+    include: {
+      groups: {
+        include: {
+          group: { select: { id: true, name: true } },
+          schedules: { select: { weekDay: true, startTime: true, endTime: true } },
+        },
+      },
+    },
     orderBy: { name: "asc" },
   })
 }

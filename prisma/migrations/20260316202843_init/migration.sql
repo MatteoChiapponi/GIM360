@@ -5,9 +5,6 @@ CREATE TYPE "UserRole" AS ENUM ('OWNER', 'TRAINER', 'RECEPTIONIST');
 CREATE TYPE "GymStatus" AS ENUM ('ACTIVE', 'INACTIVE', 'SUSPENDED');
 
 -- CreateEnum
-CREATE TYPE "ContractType" AS ENUM ('HOURLY', 'MONTHLY');
-
--- CreateEnum
 CREATE TYPE "MedicalClearance" AS ENUM ('PENDING', 'APPROVED', 'EXPIRED');
 
 -- CreateEnum
@@ -68,7 +65,6 @@ CREATE TABLE "Trainer" (
     "userId" TEXT,
     "gymId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "contractType" "ContractType" NOT NULL,
     "active" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -113,10 +109,22 @@ CREATE TABLE "TrainerGroup" (
     "id" TEXT NOT NULL,
     "trainerId" TEXT NOT NULL,
     "groupId" TEXT NOT NULL,
-    "hourlyRate" DECIMAL(10,2),
+    "hourlyRate" DECIMAL(10,2) NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "TrainerGroup_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "TrainerGroupSchedule" (
+    "id" TEXT NOT NULL,
+    "trainerGroupId" TEXT NOT NULL,
+    "weekDay" "DayOfWeek" NOT NULL,
+    "startTime" TEXT NOT NULL,
+    "endTime" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "TrainerGroupSchedule_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -165,13 +173,46 @@ CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 CREATE UNIQUE INDEX "Owner_userId_key" ON "Owner"("userId");
 
 -- CreateIndex
+CREATE INDEX "Gym_ownerId_idx" ON "Gym"("ownerId");
+
+-- CreateIndex
+CREATE INDEX "FixedExpense_gymId_idx" ON "FixedExpense"("gymId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Trainer_userId_key" ON "Trainer"("userId");
+
+-- CreateIndex
+CREATE INDEX "Trainer_gymId_idx" ON "Trainer"("gymId");
+
+-- CreateIndex
+CREATE INDEX "Student_gymId_idx" ON "Student"("gymId");
+
+-- CreateIndex
+CREATE INDEX "Group_gymId_idx" ON "Group"("gymId");
+
+-- CreateIndex
+CREATE INDEX "TrainerGroup_groupId_idx" ON "TrainerGroup"("groupId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "TrainerGroup_trainerId_groupId_key" ON "TrainerGroup"("trainerId", "groupId");
 
 -- CreateIndex
+CREATE INDEX "TrainerGroupSchedule_trainerGroupId_idx" ON "TrainerGroupSchedule"("trainerGroupId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "TrainerGroupSchedule_trainerGroupId_weekDay_key" ON "TrainerGroupSchedule"("trainerGroupId", "weekDay");
+
+-- CreateIndex
+CREATE INDEX "StudentGroup_groupId_idx" ON "StudentGroup"("groupId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "StudentGroup_studentId_groupId_key" ON "StudentGroup"("studentId", "groupId");
+
+-- CreateIndex
+CREATE INDEX "Schedule_groupId_idx" ON "Schedule"("groupId");
+
+-- CreateIndex
+CREATE INDEX "Payment_gymId_period_status_idx" ON "Payment"("gymId", "period", "status");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Payment_studentId_period_key" ON "Payment"("studentId", "period");
@@ -204,6 +245,9 @@ ALTER TABLE "TrainerGroup" ADD CONSTRAINT "TrainerGroup_trainerId_fkey" FOREIGN 
 ALTER TABLE "TrainerGroup" ADD CONSTRAINT "TrainerGroup_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "Group"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "TrainerGroupSchedule" ADD CONSTRAINT "TrainerGroupSchedule_trainerGroupId_fkey" FOREIGN KEY ("trainerGroupId") REFERENCES "TrainerGroup"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "StudentGroup" ADD CONSTRAINT "StudentGroup_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Student"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -217,14 +261,3 @@ ALTER TABLE "Payment" ADD CONSTRAINT "Payment_gymId_fkey" FOREIGN KEY ("gymId") 
 
 -- AddForeignKey
 ALTER TABLE "Payment" ADD CONSTRAINT "Payment_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Student"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- CreateIndex (Performance)
-CREATE INDEX "Gym_ownerId_idx" ON "Gym"("ownerId");
-CREATE INDEX "FixedExpense_gymId_idx" ON "FixedExpense"("gymId");
-CREATE INDEX "Trainer_gymId_idx" ON "Trainer"("gymId");
-CREATE INDEX "Student_gymId_idx" ON "Student"("gymId");
-CREATE INDEX "Group_gymId_idx" ON "Group"("gymId");
-CREATE INDEX "TrainerGroup_groupId_idx" ON "TrainerGroup"("groupId");
-CREATE INDEX "StudentGroup_groupId_idx" ON "StudentGroup"("groupId");
-CREATE INDEX "Schedule_groupId_idx" ON "Schedule"("groupId");
-CREATE INDEX "Payment_gymId_period_status_idx" ON "Payment"("gymId", "period", "status");

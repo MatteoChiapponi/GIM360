@@ -82,7 +82,7 @@ async function main() {
 
   // ── Groups ─────────────────────────────────────────────────────────────────
 
-  const [groupBeginners, groupIntermediate, groupAdvanced] = await Promise.all([
+  const [groupBeginners, groupIntermediate, groupAdvanced, groupCompetition, groupBaby] = await Promise.all([
     db.group.create({
       data: {
         gymId: gym.id,
@@ -131,37 +131,173 @@ async function main() {
         },
       },
     }),
-  ])
-
-  console.log(`✅ Groups: ${groupBeginners.name}, ${groupIntermediate.name}, ${groupAdvanced.name}`)
-
-  // ── Trainers ───────────────────────────────────────────────────────────────
-
-  const [trainerLaura, trainerMarcelo] = await Promise.all([
-    db.trainer.create({
+    // Grupo Competición: Lun-Vie 15:00-18:00 (3 horas)
+    // Caso interesante: 2 entrenadores se dividen las horas
+    db.group.create({
       data: {
         gymId: gym.id,
-        name: "Laura Pérez",
-        contractType: "MONTHLY",
-        groups: { create: { groupId: groupBeginners.id } },
+        name: "Competición",
+        monthlyPrice: 28000,
+        maxCapacity: 6,
+        schedules: {
+          create: {
+            weekDays: ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"],
+            startTime: "15:00",
+            endTime: "18:00",
+            startDate: date(2026, 1, 1),
+          },
+        },
       },
     }),
-    db.trainer.create({
+    // Grupo Baby Gym: Sáb 09:00-10:30 (solo sábados, sin cobertura completa para probar indicador)
+    db.group.create({
       data: {
         gymId: gym.id,
-        name: "Marcelo Ruiz",
-        contractType: "HOURLY",
-        groups: {
-          create: [
-            { groupId: groupIntermediate.id, hourlyRate: 3500 },
-            { groupId: groupAdvanced.id, hourlyRate: 4000 },
-          ],
+        name: "Baby Gym",
+        monthlyPrice: 10000,
+        maxCapacity: 15,
+        schedules: {
+          create: {
+            weekDays: ["SATURDAY"],
+            startTime: "09:00",
+            endTime: "10:30",
+            startDate: date(2026, 1, 1),
+          },
         },
       },
     }),
   ])
 
-  console.log(`✅ Trainers: ${trainerLaura.name} (MONTHLY, Principiantes), ${trainerMarcelo.name} (HOURLY $3.500/$4.000)`)
+  console.log(`✅ Groups: ${groupBeginners.name}, ${groupIntermediate.name}, ${groupAdvanced.name}, ${groupCompetition.name}, ${groupBaby.name}`)
+
+  // ── Trainers ───────────────────────────────────────────────────────────────
+
+  // Laura: cubre Principiantes completo (L-M-V) + Competición solo L-M-V primeras 2h
+  const trainerLaura = await db.trainer.create({
+    data: {
+      gymId: gym.id,
+      name: "Laura Pérez",
+      groups: {
+        create: [
+          {
+            groupId: groupBeginners.id,
+            hourlyRate: 3000,
+            schedules: {
+              create: [
+                { weekDay: "MONDAY", startTime: "10:00", endTime: "11:30" },
+                { weekDay: "WEDNESDAY", startTime: "10:00", endTime: "11:30" },
+                { weekDay: "FRIDAY", startTime: "10:00", endTime: "11:30" },
+              ],
+            },
+          },
+          {
+            groupId: groupCompetition.id,
+            hourlyRate: 4500,
+            schedules: {
+              create: [
+                { weekDay: "MONDAY", startTime: "15:00", endTime: "17:00" },
+                { weekDay: "WEDNESDAY", startTime: "15:00", endTime: "17:00" },
+                { weekDay: "FRIDAY", startTime: "15:00", endTime: "17:00" },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  })
+
+  // Marcelo: cubre Intermedio completo + Avanzado completo + Competición solo Ma-Ju completo
+  const trainerMarcelo = await db.trainer.create({
+    data: {
+      gymId: gym.id,
+      name: "Marcelo Ruiz",
+      groups: {
+        create: [
+          {
+            groupId: groupIntermediate.id,
+            hourlyRate: 3500,
+            schedules: {
+              create: [
+                { weekDay: "TUESDAY", startTime: "17:00", endTime: "19:00" },
+                { weekDay: "THURSDAY", startTime: "17:00", endTime: "19:00" },
+              ],
+            },
+          },
+          {
+            groupId: groupAdvanced.id,
+            hourlyRate: 4000,
+            schedules: {
+              create: [
+                { weekDay: "MONDAY", startTime: "08:00", endTime: "10:00" },
+                { weekDay: "TUESDAY", startTime: "08:00", endTime: "10:00" },
+                { weekDay: "WEDNESDAY", startTime: "08:00", endTime: "10:00" },
+                { weekDay: "THURSDAY", startTime: "08:00", endTime: "10:00" },
+                { weekDay: "FRIDAY", startTime: "08:00", endTime: "10:00" },
+              ],
+            },
+          },
+          {
+            groupId: groupCompetition.id,
+            hourlyRate: 4500,
+            schedules: {
+              create: [
+                { weekDay: "TUESDAY", startTime: "15:00", endTime: "18:00" },
+                { weekDay: "THURSDAY", startTime: "15:00", endTime: "18:00" },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  })
+
+  // Gabriela: cubre Competición L-M-V la última hora (17:00-18:00), complementa a Laura
+  // También cubre Baby Gym sábado pero solo 45 minutos (cobertura parcial)
+  const trainerGabriela = await db.trainer.create({
+    data: {
+      gymId: gym.id,
+      name: "Gabriela Díaz",
+      groups: {
+        create: [
+          {
+            groupId: groupCompetition.id,
+            hourlyRate: 3000,
+            schedules: {
+              create: [
+                { weekDay: "MONDAY", startTime: "17:00", endTime: "18:00" },
+                { weekDay: "WEDNESDAY", startTime: "17:00", endTime: "18:00" },
+                { weekDay: "FRIDAY", startTime: "17:00", endTime: "18:00" },
+              ],
+            },
+          },
+          {
+            groupId: groupBaby.id,
+            hourlyRate: 2500,
+            schedules: {
+              create: [
+                { weekDay: "SATURDAY", startTime: "09:00", endTime: "09:45" },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  })
+
+  // Nicolás: entrenador inactivo (dado de baja) — para probar soft delete
+  const trainerNicolas = await db.trainer.create({
+    data: {
+      gymId: gym.id,
+      name: "Nicolás Vega",
+      active: false,
+    },
+  })
+
+  console.log(`✅ Trainers:`)
+  console.log(`   Laura ($3k/h Principiantes, $4.5k/h Competición L-M-V 15-17h)`)
+  console.log(`   Marcelo ($3.5k/h Intermedio, $4k/h Avanzado, $4.5k/h Competición Ma-Ju)`)
+  console.log(`   Gabriela ($3k/h Competición L-M-V 17-18h, $2.5k/h Baby Gym 09:00-09:45)`)
+  console.log(`   Nicolás (INACTIVO)`)
 
   // ── Students ───────────────────────────────────────────────────────────────
   // Mix of situations:
@@ -170,7 +306,7 @@ async function main() {
   //   - One inactive student (leftAt set)
 
   const studentsData = [
-    // Principiantes only — pays on the 5th
+    // Principiantes only
     {
       firstName: "Ana",
       lastName: "García",
@@ -179,7 +315,6 @@ async function main() {
       dueDay: 5,
       groups: [groupBeginners.id],
     },
-    // Principiantes only — pays on the 12th
     {
       firstName: "Carlos",
       lastName: "López",
@@ -188,7 +323,15 @@ async function main() {
       dueDay: 12,
       groups: [groupBeginners.id],
     },
-    // Intermedio only — pays on the 1st
+    {
+      firstName: "Martina",
+      lastName: "Álvarez",
+      phone: "1167890123",
+      joinedAt: date(2026, 1, 15),
+      dueDay: 15,
+      groups: [groupBeginners.id],
+    },
+    // Intermedio only
     {
       firstName: "Sofía",
       lastName: "Martínez",
@@ -198,7 +341,6 @@ async function main() {
       dueDay: 1,
       groups: [groupIntermediate.id],
     },
-    // Intermedio only — pays on the 20th
     {
       firstName: "Tomás",
       lastName: "Fernández",
@@ -207,7 +349,15 @@ async function main() {
       dueDay: 20,
       groups: [groupIntermediate.id],
     },
-    // Avanzado only — pays on the 15th
+    {
+      firstName: "Lautaro",
+      lastName: "Giménez",
+      phone: "1101234567",
+      joinedAt: date(2025, 11, 1),
+      dueDay: 1,
+      groups: [groupIntermediate.id],
+    },
+    // Avanzado only
     {
       firstName: "Valentina",
       lastName: "Rodríguez",
@@ -217,7 +367,65 @@ async function main() {
       dueDay: 15,
       groups: [groupAdvanced.id],
     },
-    // Principiantes + Intermedio (two groups) — pays on the 3rd
+    {
+      firstName: "Joaquín",
+      lastName: "Herrera",
+      phone: "1189012345",
+      nationalId: "41555666",
+      joinedAt: date(2025, 7, 10),
+      dueDay: 10,
+      groups: [groupAdvanced.id],
+    },
+    // Competición only
+    {
+      firstName: "Milagros",
+      lastName: "Romero",
+      phone: "1145671234",
+      nationalId: "39222333",
+      joinedAt: date(2025, 6, 1),
+      dueDay: 1,
+      medicalClearance: "APPROVED" as const,
+      groups: [groupCompetition.id],
+    },
+    {
+      firstName: "Agustina",
+      lastName: "Cabrera",
+      phone: "1156782345",
+      nationalId: "40444555",
+      joinedAt: date(2025, 9, 1),
+      dueDay: 1,
+      medicalClearance: "APPROVED" as const,
+      groups: [groupCompetition.id],
+    },
+    {
+      firstName: "Florencia",
+      lastName: "Molina",
+      phone: "1167893456",
+      joinedAt: date(2026, 1, 10),
+      dueDay: 10,
+      medicalClearance: "PENDING" as const,
+      groups: [groupCompetition.id],
+    },
+    // Baby Gym
+    {
+      firstName: "Isabella",
+      lastName: "Paz",
+      phone: "1178904567",
+      birthDate: date(2021, 3, 15),
+      joinedAt: date(2026, 2, 1),
+      dueDay: 1,
+      groups: [groupBaby.id],
+    },
+    {
+      firstName: "Mateo",
+      lastName: "Ríos",
+      phone: "1189015678",
+      birthDate: date(2020, 8, 22),
+      joinedAt: date(2026, 2, 1),
+      dueDay: 1,
+      groups: [groupBaby.id],
+    },
+    // Multi-grupo
     {
       firstName: "Lucas",
       lastName: "Sánchez",
@@ -226,7 +434,6 @@ async function main() {
       dueDay: 3,
       groups: [groupBeginners.id, groupIntermediate.id],
     },
-    // Principiantes + Avanzado (two groups) — pays on the 8th
     {
       firstName: "Camila",
       lastName: "Torres",
@@ -235,7 +442,17 @@ async function main() {
       dueDay: 8,
       groups: [groupBeginners.id, groupAdvanced.id],
     },
-    // Inactive student (leftAt set) — should NOT appear in active metrics
+    {
+      firstName: "Emilia",
+      lastName: "Suárez",
+      phone: "1123456780",
+      nationalId: "39888999",
+      joinedAt: date(2025, 10, 1),
+      dueDay: 1,
+      medicalClearance: "APPROVED" as const,
+      groups: [groupAdvanced.id, groupCompetition.id],
+    },
+    // Inactive student
     {
       firstName: "Diego",
       lastName: "Morales",
@@ -291,33 +508,58 @@ async function main() {
   const januaryPayments = [
     { student: "Ana",       status: "PAID",    paidAt: date(2026, 1, 5)  },
     { student: "Carlos",    status: "PAID",    paidAt: date(2026, 1, 14) },
+    { student: "Martina",   status: "PAID",    paidAt: date(2026, 1, 16) },
     { student: "Sofía",     status: "PAID",    paidAt: date(2026, 1, 3)  },
     { student: "Tomás",     status: "PAID",    paidAt: date(2026, 1, 22) },
+    { student: "Lautaro",   status: "PAID",    paidAt: date(2026, 1, 5)  },
     { student: "Valentina", status: "PAID",    paidAt: date(2026, 1, 16) },
+    { student: "Joaquín",   status: "PAID",    paidAt: date(2026, 1, 12) },
+    { student: "Milagros",  status: "PAID",    paidAt: date(2026, 1, 3)  },
+    { student: "Agustina",  status: "PAID",    paidAt: date(2026, 1, 5)  },
+    { student: "Florencia", status: "PAID",    paidAt: date(2026, 1, 12) },
     { student: "Lucas",     status: "EXPIRED", paidAt: null              },
     { student: "Camila",    status: "PAID",    paidAt: date(2026, 1, 10) },
+    { student: "Emilia",    status: "PAID",    paidAt: date(2026, 1, 5)  },
   ] as const
 
   // February 2026 — past month, mix of paid and pending
   const februaryPayments = [
     { student: "Ana",       status: "PAID",    paidAt: date(2026, 2, 6)  },
     { student: "Carlos",    status: "PAID",    paidAt: date(2026, 2, 14) },
+    { student: "Martina",   status: "PAID",    paidAt: date(2026, 2, 16) },
     { student: "Sofía",     status: "PAID",    paidAt: date(2026, 2, 2)  },
     { student: "Tomás",     status: "PAID",    paidAt: date(2026, 2, 21) },
+    { student: "Lautaro",   status: "PENDING", paidAt: null              },
     { student: "Valentina", status: "PENDING", paidAt: null              },
+    { student: "Joaquín",   status: "PAID",    paidAt: date(2026, 2, 11) },
+    { student: "Milagros",  status: "PAID",    paidAt: date(2026, 2, 3)  },
+    { student: "Agustina",  status: "PAID",    paidAt: date(2026, 2, 6)  },
+    { student: "Florencia", status: "PENDING", paidAt: null              },
+    { student: "Isabella",  status: "PAID",    paidAt: date(2026, 2, 2)  },
+    { student: "Mateo",     status: "PAID",    paidAt: date(2026, 2, 3)  },
     { student: "Lucas",     status: "PAID",    paidAt: date(2026, 2, 5)  },
     { student: "Camila",    status: "PENDING", paidAt: null              },
+    { student: "Emilia",    status: "PAID",    paidAt: date(2026, 2, 4)  },
   ] as const
 
   // March 2026 — current month, realistic in-progress state
   const marchPayments = [
     { student: "Ana",       status: "PAID",    paidAt: date(2026, 3, 5)  },
     { student: "Carlos",    status: "PENDING", paidAt: null              },
+    { student: "Martina",   status: "PAID",    paidAt: date(2026, 3, 15) },
     { student: "Sofía",     status: "PAID",    paidAt: date(2026, 3, 2)  },
     { student: "Tomás",     status: "PENDING", paidAt: null              },
+    { student: "Lautaro",   status: "PAID",    paidAt: date(2026, 3, 3)  },
     { student: "Valentina", status: "PAID",    paidAt: date(2026, 3, 15) },
+    { student: "Joaquín",   status: "PENDING", paidAt: null              },
+    { student: "Milagros",  status: "PAID",    paidAt: date(2026, 3, 2)  },
+    { student: "Agustina",  status: "EXPIRED", paidAt: null              },
+    { student: "Florencia", status: "PAID",    paidAt: date(2026, 3, 11) },
+    { student: "Isabella",  status: "PAID",    paidAt: date(2026, 3, 2)  },
+    { student: "Mateo",     status: "PENDING", paidAt: null              },
     { student: "Lucas",     status: "PAID",    paidAt: date(2026, 3, 4)  },
     { student: "Camila",    status: "EXPIRED", paidAt: null              },
+    { student: "Emilia",    status: "PAID",    paidAt: date(2026, 3, 3)  },
   ] as const
 
   for (const [period, entries] of [
@@ -340,7 +582,7 @@ async function main() {
     }
   }
 
-  console.log(`✅ Payments: Enero (7) + Febrero (7) + Marzo (7 registros)`)
+  console.log(`✅ Payments: Enero (14) + Febrero (16) + Marzo (16 registros)`)
 
   // ── Summary ────────────────────────────────────────────────────────────────
 
@@ -348,11 +590,28 @@ async function main() {
 📋 Resumen
    Gym ID:      ${gym.id}
    Login:       admin@gym360.com / admin1234
-   Grupos:      Principiantes ($15k), Intermedio ($18k), Avanzado ($22k)
-   Entrenadores: Laura (MONTHLY, Principiantes) · Marcelo (HOURLY, Intermedio+Avanzado)
-   Alumnos:     7 activos + 1 baja (Diego)
-   Gastos fijos: $180.000/mes (alquiler, servicios, internet, limpieza, seguro)
-   Pagos:       Enero (casi todo pago) · Febrero (mix) · Marzo (en curso)
+
+   Grupos (5):
+     Principiantes ($15k, L-M-V 10:00-11:30)
+     Intermedio ($18k, Ma-Ju 17:00-19:00)
+     Avanzado ($22k, L-V 08:00-10:00)
+     Competición ($28k, L-V 15:00-18:00)
+     Baby Gym ($10k, Sáb 09:00-10:30)
+
+   Entrenadores (4):
+     Laura: Principiantes completo + Competición L-M-V 15:00-17:00
+     Marcelo: Intermedio completo + Avanzado completo + Competición Ma-Ju completo
+     Gabriela: Competición L-M-V 17:00-18:00 + Baby Gym Sáb 09:00-09:45 (parcial!)
+     Nicolás: INACTIVO
+
+   Cobertura interesante:
+     Competición L-M-V: Laura 15-17h + Gabriela 17-18h = cubierto
+     Competición Ma-Ju: Marcelo 15-18h = cubierto
+     Baby Gym Sáb: Gabriela 09:00-09:45 = parcial (falta 09:45-10:30)
+
+   Alumnos: 16 activos + 1 baja (Diego)
+   Gastos fijos: $180.000/mes
+   Pagos: Enero · Febrero · Marzo (46 registros)
 
    👉 Probá las métricas con period=2026-01, 2026-02 o 2026-03
   `)

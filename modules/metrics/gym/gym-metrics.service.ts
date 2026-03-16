@@ -13,15 +13,16 @@ function parseMinutes(time: string): number {
 }
 
 /**
- * Estimates monthly hours for a set of schedules using the 4.33 weeks/month approximation.
- * Formula per schedule: sessionDuration (hrs) × weekDays.length × 4.33
+ * Computes actual monthly minutes for a trainer based on their individual schedule entries.
+ * Each entry is a single weekDay with startTime/endTime.
+ * Uses 4.33 weeks/month approximation.
  */
-function computeMonthlyHours(
-  schedules: { weekDays: string[]; startTime: string; endTime: string }[]
+function computeTrainerMonthlyMinutes(
+  trainerSchedules: { weekDay: string; startTime: string; endTime: string }[]
 ): number {
-  return schedules.reduce((total, s) => {
-    const durationHrs = (parseMinutes(s.endTime) - parseMinutes(s.startTime)) / 60
-    return total + durationHrs * s.weekDays.length * 4.33
+  return trainerSchedules.reduce((total, s) => {
+    const minutes = parseMinutes(s.endTime) - parseMinutes(s.startTime)
+    return total + minutes * 4.33
   }, 0)
 }
 
@@ -32,10 +33,7 @@ export type GymMetrics = {
   totalCollectedRevenue: number
   /** Sum of all PENDING payment amounts for the gym in the period */
   totalPendingRevenue: number
-  /**
-   * Estimated trainer cost: Σ (hourlyRate × monthlyHours) per active trainer per group.
-   * For MONTHLY contract trainers without a salary field, hourlyRate × hours is used as an estimate.
-   */
+  /** Trainer cost: Σ hourlyRate × (actualMinutes / 60) per active trainer per group */
   totalTrainerCost: number
   /** Sum of all FixedExpense amounts for the gym */
   totalFixedExpenses: number
@@ -66,12 +64,8 @@ export async function getGymMetrics(input: MetricsQueryInput): Promise<GymMetric
       include: {
         groups: {
           include: {
-            group: {
-              include: {
-                schedules: {
-                  select: { weekDays: true, startTime: true, endTime: true },
-                },
-              },
+            schedules: {
+              select: { weekDay: true, startTime: true, endTime: true },
             },
           },
         },
@@ -92,12 +86,12 @@ export async function getGymMetrics(input: MetricsQueryInput): Promise<GymMetric
     0
   )
 
-  // Trainer cost: each active trainer × each group they teach × (hourlyRate × monthlyHours)
+  // Trainer cost: each active trainer × each group × hourlyRate × (actual minutes / 60)
   const totalTrainerCost = trainers.reduce((trainerSum, trainer) => {
     const groupCost = trainer.groups.reduce((groupSum, tg) => {
-      if (!tg.hourlyRate) return groupSum
-      const monthlyHours = computeMonthlyHours(tg.group.schedules)
-      return groupSum + Number(tg.hourlyRate) * monthlyHours
+      const rate = Number(tg.hourlyRate)
+      const trainerMinutes = computeTrainerMonthlyMinutes(tg.schedules)
+      return groupSum + rate * (trainerMinutes / 60)
     }, 0)
     return trainerSum + groupCost
   }, 0)

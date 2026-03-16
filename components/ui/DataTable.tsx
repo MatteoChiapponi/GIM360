@@ -16,6 +16,7 @@ interface DataTableProps<T> {
   rowKey: (item: T) => string
   rowClassName?: (item: T, i: number) => string
   renderRow?: (item: T, i: number, defaultRow: React.ReactNode) => React.ReactNode
+  onRowClick?: (item: T) => void
 }
 
 export function DataTable<T>({
@@ -29,6 +30,7 @@ export function DataTable<T>({
   rowKey,
   rowClassName,
   renderRow,
+  onRowClick,
 }: DataTableProps<T>) {
   return (
     <div className="rounded-xl border border-[#E5E4E0] bg-white overflow-hidden">
@@ -62,9 +64,9 @@ export function DataTable<T>({
               {data.map((item, i) => {
                 const cls = rowClassName
                   ? rowClassName(item, i)
-                  : `hover:bg-[#FAFAF9] transition-colors ${i > 0 ? "border-t border-[#F7F6F3]" : ""}`
+                  : `transition-colors ${i > 0 ? "border-t border-[#F7F6F3]" : ""}${onRowClick ? " cursor-pointer hover:bg-[#F0EFEB]" : " hover:bg-[#FAFAF9]"}`
                 const defaultRow = (
-                  <tr key={rowKey(item)} className={cls}>
+                  <tr key={rowKey(item)} className={cls} onClick={onRowClick ? () => onRowClick(item) : undefined}>
                     {columns.map((col) => (
                       <td
                         key={col.key}

@@ -10,7 +10,7 @@ import { StatCard } from "@/components/ui/StatCard"
 import { PageHeader } from "@/components/ui/PageHeader"
 import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
-import { InlineForm } from "@/components/ui/InlineForm"
+import { FormModal } from "@/components/ui/FormModal"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 
 type FixedExpense = { id: string; name: string; amount: string; createdAt: string }
@@ -111,22 +111,21 @@ export default function ExpensesView({ gymId }: { gymId: string }) {
         sortDir={sortDir} onSortDirToggle={() => setSortDir((d) => d === "asc" ? "desc" : "asc")}
       />
 
-      {showForm && (
-        <InlineForm
-          title="Nuevo gasto fijo"
-          error={formError}
-          onSubmit={handleCreate}
-          submitting={submitting}
-          onCancel={() => { setShowForm(false); setForm(EMPTY_FORM); setFormError(null) }}
-        >
-          <FormField label="Nombre" required>
-            <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ej: Alquiler" />
-          </FormField>
-          <FormField label="Monto mensual" required>
-            <Input type="number" min="0" step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} placeholder="Ej: 50000" />
-          </FormField>
-        </InlineForm>
-      )}
+      <FormModal
+        open={showForm}
+        title="Nuevo gasto fijo"
+        error={formError}
+        onSubmit={handleCreate}
+        submitting={submitting}
+        onCancel={() => { setShowForm(false); setForm(EMPTY_FORM); setFormError(null) }}
+      >
+        <FormField label="Nombre" required>
+          <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ej: Alquiler" />
+        </FormField>
+        <FormField label="Monto mensual" required>
+          <Input type="number" min="0" step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} placeholder="Ej: 50000" />
+        </FormField>
+      </FormModal>
 
       <DataTable
         columns={[

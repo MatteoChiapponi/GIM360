@@ -25,6 +25,20 @@ function computeMonthlyHours(
   }, 0)
 }
 
+/**
+ * Computes actual monthly minutes for a trainer based on their individual schedule entries.
+ * Each entry is a single weekDay with startTime/endTime.
+ * Uses 4.33 weeks/month approximation.
+ */
+function computeTrainerMonthlyMinutes(
+  trainerSchedules: { weekDay: string; startTime: string; endTime: string }[]
+): number {
+  return trainerSchedules.reduce((total, s) => {
+    const minutes = parseMinutes(s.endTime) - parseMinutes(s.startTime)
+    return total + minutes * 4.33
+  }, 0)
+}
+
 export type GroupMetrics = {
   groupId: string
   groupName: string
@@ -39,15 +53,10 @@ export type GroupMetrics = {
   collectedRevenue: number
   /** Estimated monthly hours across all schedules for this group */
   monthlyHours: number
-  /** Sum of hourlyRate × monthlyHours for all trainers in this group */
+  /** Sum of hourlyRate × (trainerMinutes / 60) × 4.33 for all trainers in this group */
   trainerCost: number
   /** collectedRevenue - trainerCost */
   margin: number
-  /**
-   * Warning shown when one or more trainers are on MONTHLY contracts.
-   * The schema has no salary field, so cost is estimated as hourlyRate × monthlyHours.
-   */
-  trainerCostNote: string | null
 }
 
 /**
@@ -69,7 +78,8 @@ export async function getGroupMetrics(input: MetricsQueryInput): Promise<GroupMe
         },
         trainers: {
           include: {
-            trainer: { select: { id: true, name: true, contractType: true } },
+            trainer: { select: { id: true, name: true } },
+            schedules: { select: { weekDay: true, startTime: true, endTime: true } },
           },
         },
         schedules: {
@@ -120,13 +130,11 @@ export async function getGroupMetrics(input: MetricsQueryInput): Promise<GroupMe
     const monthlyPrice = Number(group.monthlyPrice)
     const monthlyHours = computeMonthlyHours(group.schedules)
 
-    const hasMonthlyTrainer = group.trainers.some(
-      (tg) => tg.trainer.contractType === "MONTHLY"
-    )
-
+    // Trainer cost: hourlyRate × (actual trainer minutes / 60) proportional
     const trainerCost = group.trainers.reduce((sum, tg) => {
-      const rate = tg.hourlyRate ? Number(tg.hourlyRate) : 0
-      return sum + rate * monthlyHours
+      const rate = Number(tg.hourlyRate)
+      const trainerMinutes = computeTrainerMonthlyMinutes(tg.schedules)
+      return sum + rate * (trainerMinutes / 60)
     }, 0)
 
     const collectedRevenue = collectedByGroup.get(group.id) ?? 0
@@ -143,9 +151,6 @@ export async function getGroupMetrics(input: MetricsQueryInput): Promise<GroupMe
       monthlyHours,
       trainerCost,
       margin: collectedRevenue - trainerCost,
-      trainerCostNote: hasMonthlyTrainer
-        ? "Uno o más entrenadores tienen contrato mensual. El costo se estima como tarifa × horas mensuales; el salario real puede diferir."
-        : null,
     }
   })
 }

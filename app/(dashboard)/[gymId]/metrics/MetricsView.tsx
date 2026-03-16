@@ -18,7 +18,6 @@ type GroupMetrics = {
   activeStudents: number; maxCapacity: number | null; occupancyRate: number | null
   projectedRevenue: number; collectedRevenue: number
   monthlyHours: number; trainerCost: number; margin: number
-  trainerCostNote: string | null
 }
 
 type MetricView = "general" | "gimnasio" | "grupos"
@@ -253,10 +252,7 @@ export default function MetricsView({ gymId }: { gymId: string }) {
                     <tbody>
                       {groupMetrics.map((g, i) => (
                         <tr key={g.groupId} className={`hover:bg-[#FAFAF9] transition-colors ${i > 0 ? "border-t border-[#F7F6F3]" : ""}`}>
-                          <td className="px-4 py-4 font-medium text-[#111110]">
-                            {g.groupName}
-                            {g.trainerCostNote && <span className="ml-2 cursor-help text-amber-500" title={g.trainerCostNote}>⚠</span>}
-                          </td>
+                          <td className="px-4 py-4 font-medium text-[#111110]">{g.groupName}</td>
                           <td className="px-4 py-4 text-right text-[#68685F]">
                             {g.activeStudents}{g.maxCapacity != null && <span className="text-[#A5A49D]"> / {g.maxCapacity}</span>}
                           </td>

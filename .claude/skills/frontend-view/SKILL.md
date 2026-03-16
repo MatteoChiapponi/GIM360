@@ -31,10 +31,13 @@ allowed-tools: Read, Write, Glob, Bash
 - Después de una acción exitosa (create/edit/delete), hacer `refetch()` inmediatamente para que la tabla refleje el cambio sin recargar la página.
 
 **Formularios**
-- Usar `InlineForm` — el formulario aparece en la misma página, no navega a otra pantalla. El usuario nunca pierde el contexto.
+- Usar `FormModal` — el formulario de creación se abre en un modal centrado con backdrop, no inline. Esto evita confundir al usuario con formularios que aparecen entre el contenido.
 - El botón "Cancelar" siempre limpia el formulario y el error: `setForm(EMPTY_FORM); setFormError(null); setShowForm(false)`.
 - Validar en el cliente antes de hacer fetch. Si falta un campo requerido, mostrar el error sin llamar al servidor.
 - En inline editing, el formulario reemplaza la fila en la tabla para que el usuario vea exactamente qué está editando.
+
+**Inputs numéricos**
+- Los `<input type="number">` NO deben mostrar flechas de incremento/decremento (spinners). Esto ya está resuelto globalmente en `globals.css`. No agregar estilos extra para esto.
 
 **Acciones destructivas**
 - "Dar de baja", "Desactivar", "Eliminar", "Desinscribir", "Remover" usan `variant="danger"` (rojo).
@@ -104,7 +107,7 @@ import { Tabs }           from "@/components/ui/Tabs"            // pill tabs; p
 import { PageHeader }     from "@/components/ui/PageHeader"      // h1 + subtitle + action slot
 import { SearchToolbar }  from "@/components/ui/SearchToolbar"   // search input + sort select + dir toggle
 import { DataTable }      from "@/components/ui/DataTable"       // generic table with loading/error/empty states
-import { InlineForm }     from "@/components/ui/InlineForm"      // create form card with Save/Cancel buttons
+import { FormModal }      from "@/components/ui/FormModal"        // modal form with backdrop for create actions; props: open, title, error, onSubmit, submitting, onCancel, gridCols?, children
 ```
 
 ### Hook
@@ -130,7 +133,7 @@ import { StatCard }      from "@/components/ui/StatCard"
 import { PageHeader }    from "@/components/ui/PageHeader"
 import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable }     from "@/components/ui/DataTable"
-import { InlineForm }    from "@/components/ui/InlineForm"
+import { FormModal }     from "@/components/ui/FormModal"
 
 type ${Domain} = { id: string; /* ...fields */ }
 type NewForm   = { /* ...fields */ }
@@ -189,20 +192,19 @@ export default function ${Domain}View({ gymId }: { gymId: string }) {
         sortDir={sortDir} onSortDirToggle={() => setSortDir((d) => d === "asc" ? "desc" : "asc")}
       />
 
-      {showForm && (
-        <InlineForm
-          title="Nuevo"
-          error={formError}
-          onSubmit={handleCreate}
-          submitting={submitting}
-          onCancel={() => { setShowForm(false); setForm(EMPTY_FORM); setFormError(null) }}
-        >
-          <FormField label="Nombre" required>
-            <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ej: …" />
-          </FormField>
-          {/* more fields */}
-        </InlineForm>
-      )}
+      <FormModal
+        open={showForm}
+        title="Nuevo"
+        error={formError}
+        onSubmit={handleCreate}
+        submitting={submitting}
+        onCancel={() => { setShowForm(false); setForm(EMPTY_FORM); setFormError(null) }}
+      >
+        <FormField label="Nombre" required>
+          <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ej: …" />
+        </FormField>
+        {/* more fields */}
+      </FormModal>
 
       <DataTable
         columns={[

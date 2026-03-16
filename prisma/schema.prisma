@@ -21,11 +21,6 @@ enum GymStatus {
   SUSPENDED
 }
 
-enum ContractType {
-  HOURLY
-  MONTHLY
-}
-
 enum MedicalClearance {
   PENDING
   APPROVED
@@ -109,7 +104,6 @@ model Trainer {
   gymId        String
   gym          Gym          @relation(fields: [gymId], references: [id])
   name         String
-  contractType ContractType
   active       Boolean      @default(true)
   createdAt    DateTime     @default(now())
 
@@ -164,11 +158,26 @@ model TrainerGroup {
   trainer    Trainer  @relation(fields: [trainerId], references: [id])
   groupId    String
   group      Group    @relation(fields: [groupId], references: [id])
-  hourlyRate Decimal? @db.Decimal(10, 2)
+  hourlyRate Decimal  @db.Decimal(10, 2)
   createdAt  DateTime @default(now())
+
+  schedules TrainerGroupSchedule[]
 
   @@unique([trainerId, groupId])
   @@index([groupId])
+}
+
+model TrainerGroupSchedule {
+  id             String       @id @default(cuid())
+  trainerGroupId String
+  trainerGroup   TrainerGroup @relation(fields: [trainerGroupId], references: [id], onDelete: Cascade)
+  weekDay        DayOfWeek
+  startTime      String // "HH:MM"
+  endTime        String // "HH:MM"
+  createdAt      DateTime     @default(now())
+
+  @@unique([trainerGroupId, weekDay])
+  @@index([trainerGroupId])
 }
 
 model StudentGroup {

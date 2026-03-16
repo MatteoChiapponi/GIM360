@@ -12,7 +12,7 @@ import { Tabs } from "@/components/ui/Tabs"
 import { PageHeader } from "@/components/ui/PageHeader"
 import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
-import { InlineForm } from "@/components/ui/InlineForm"
+import { FormModal } from "@/components/ui/FormModal"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 
 type MedicalClearance = "PENDING" | "APPROVED" | "EXPIRED"
@@ -157,29 +157,28 @@ export default function StudentsView({ gymId }: { gymId: string }) {
         sortDir={sortDir} onSortDirToggle={() => setSortDir((d) => d === "asc" ? "desc" : "asc")}
       />
 
-      {showForm && (
-        <InlineForm
-          title="Nuevo alumno"
-          error={formError}
-          onSubmit={handleCreate}
-          submitting={submitting}
-          onCancel={() => { setShowForm(false); setForm(EMPTY_FORM); setFormError(null) }}
-          gridCols="sm:grid-cols-2 lg:grid-cols-4"
-        >
-          <FormField label="Nombre" required>
-            <Input value={form.firstName} onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))} placeholder="Ej: María" />
-          </FormField>
-          <FormField label="Apellido" required>
-            <Input value={form.lastName} onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))} placeholder="Ej: García" />
-          </FormField>
-          <FormField label="Día de cobro" required>
-            <Input type="number" min="1" max="31" value={form.dueDay} onChange={(e) => setForm((f) => ({ ...f, dueDay: e.target.value }))} placeholder="Ej: 10" />
-          </FormField>
-          <FormField label="Teléfono">
-            <Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Ej: 11 1234-5678" />
-          </FormField>
-        </InlineForm>
-      )}
+      <FormModal
+        open={showForm}
+        title="Nuevo alumno"
+        error={formError}
+        onSubmit={handleCreate}
+        submitting={submitting}
+        onCancel={() => { setShowForm(false); setForm(EMPTY_FORM); setFormError(null) }}
+        gridCols="sm:grid-cols-2"
+      >
+        <FormField label="Nombre" required>
+          <Input value={form.firstName} onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))} placeholder="Ej: María" />
+        </FormField>
+        <FormField label="Apellido" required>
+          <Input value={form.lastName} onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))} placeholder="Ej: García" />
+        </FormField>
+        <FormField label="Día de cobro" required>
+          <Input type="number" min="1" max="31" value={form.dueDay} onChange={(e) => setForm((f) => ({ ...f, dueDay: e.target.value }))} placeholder="Ej: 10" />
+        </FormField>
+        <FormField label="Teléfono">
+          <Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Ej: 11 1234-5678" />
+        </FormField>
+      </FormModal>
 
       <DataTable
         columns={[
