@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useFetch } from "@/hooks/useFetch"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
+import { NumberInput } from "@/components/ui/NumberInput"
 import { FormField } from "@/components/ui/FormField"
 import { StatCard } from "@/components/ui/StatCard"
 import { PageHeader } from "@/components/ui/PageHeader"
@@ -124,7 +125,7 @@ export default function ExpensesView({ gymId }: { gymId: string }) {
           <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ej: Alquiler" />
         </FormField>
         <FormField label="Monto mensual" required>
-          <Input type="number" min="0" step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} placeholder="Ej: 50000" />
+          <NumberInput value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} placeholder="Ej: 50000" />
         </FormField>
       </FormModal>
 
@@ -140,7 +141,7 @@ export default function ExpensesView({ gymId }: { gymId: string }) {
           <Input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ej: Alquiler" />
         </FormField>
         <FormField label="Monto mensual" required>
-          <Input type="number" min="0" step="0.01" value={editForm.amount} onChange={(e) => setEditForm((f) => ({ ...f, amount: e.target.value }))} placeholder="Ej: 50000" />
+          <NumberInput value={editForm.amount} onChange={(e) => setEditForm((f) => ({ ...f, amount: e.target.value }))} placeholder="Ej: 50000" />
         </FormField>
       </FormModal>
 

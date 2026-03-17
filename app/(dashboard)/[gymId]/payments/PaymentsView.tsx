@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/ui/PageHeader"
 import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
 import { Button } from "@/components/ui/Button"
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 
 type PaymentStatus = "PENDING" | "PAID" | "EXPIRED"
 
@@ -57,6 +58,8 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
 
   useEffect(() => { fetchPayments() }, [fetchPayments])
 
+  const [confirmUnpayId, setConfirmUnpayId] = useState<string | null>(null)
+
   async function handleMarkPaid(id: string) {
     setUpdatingId(id)
     const res = await fetch(`/api/payments/${id}?gymId=${gymId}`, {
@@ -66,6 +69,21 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
     if (res.ok) {
       const updated = await res.json()
       setPayments((prev) => prev.map((p) => (p.id === id ? updated : p)))
+    }
+    setUpdatingId(null)
+  }
+
+  async function handleUnmarkPaid(id: string) {
+    setConfirmUnpayId(null)
+    setUpdatingId(id)
+    const res = await fetch(`/api/payments/${id}?gymId=${gymId}`, { method: "DELETE" })
+    if (res.ok) {
+      // Regenerate so the student reappears as PENDING
+      await fetch("/api/payments", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gymId, period }),
+      })
+      await fetchPayments()
     }
     setUpdatingId(null)
   }
@@ -149,11 +167,18 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
           { key: "paidAt", header: "Fecha de pago", render: (p) => <span className="text-[#A5A49D]">{p.paidAt ? new Date(p.paidAt).toLocaleDateString("es-AR") : "—"}</span> },
           { key: "actions", header: "", align: "right", render: (p) => {
             const busy = updatingId === p.id
-            return p.status !== "PAID" ? (
+            if (p.status === "PAID") {
+              return (
+                <Button variant="danger" onClick={() => setConfirmUnpayId(p.id)} disabled={busy}>
+                  {busy ? "…" : "Desmarcar pagado"}
+                </Button>
+              )
+            }
+            return (
               <Button variant="link" onClick={() => handleMarkPaid(p.id)} disabled={busy} className="disabled:opacity-40">
                 {busy ? "…" : "Marcar pagado"}
               </Button>
-            ) : null
+            )
           }},
         ]}
         data={displayed}
@@ -162,6 +187,15 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
         emptyHint={!search ? "Las cuotas se generan automáticamente cuando hay alumnos inscriptos en grupos." : undefined}
         minWidth="580px"
         rowKey={(p) => p.id}
+      />
+
+      <ConfirmDialog
+        open={confirmUnpayId !== null}
+        title="Desmarcar como pagado"
+        message="Esta cuota volverá al estado Pendiente y se borrará la fecha de pago. ¿Querés continuar?"
+        confirmLabel="Desmarcar"
+        onConfirm={() => { if (confirmUnpayId) handleUnmarkPaid(confirmUnpayId) }}
+        onCancel={() => setConfirmUnpayId(null)}
       />
     </div>
   )

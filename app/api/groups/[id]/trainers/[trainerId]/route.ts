@@ -8,6 +8,11 @@ import { db } from "@/lib/db"
 
 type Params = { id: string; trainerId: string }
 
+const DAY_ES: Record<string, string> = {
+  MONDAY: "LUNES", TUESDAY: "MARTES", WEDNESDAY: "MIÉRCOLES",
+  THURSDAY: "JUEVES", FRIDAY: "VIERNES", SATURDAY: "SÁBADO", SUNDAY: "DOMINGO",
+}
+
 export const PATCH = withAuthParams<Params>([UserRole.OWNER], async (req, session, { id: groupId, trainerId }) => {
   const gymId = req.nextUrl.searchParams.get("gymId")
   if (!gymId) return NextResponse.json({ error: "gymId required" }, { status: 400 })
@@ -34,7 +39,7 @@ export const PATCH = withAuthParams<Params>([UserRole.OWNER], async (req, sessio
   for (const entry of parsed.data.schedules) {
     if (!groupWeekDays.has(entry.weekDay)) {
       return NextResponse.json(
-        { error: `El día ${entry.weekDay} no pertenece al horario del grupo` },
+        { error: `El día ${DAY_ES[entry.weekDay] ?? entry.weekDay} no pertenece al horario del grupo` },
         { status: 400 }
       )
     }
@@ -42,7 +47,7 @@ export const PATCH = withAuthParams<Params>([UserRole.OWNER], async (req, sessio
     const groupSchedule = group.schedules.find((s) => s.weekDays.includes(entry.weekDay))
     if (groupSchedule && (entry.startTime < groupSchedule.startTime || entry.endTime > groupSchedule.endTime)) {
       return NextResponse.json(
-        { error: `El horario ${entry.startTime}-${entry.endTime} excede el horario del grupo para ${entry.weekDay}` },
+        { error: `El horario ${entry.startTime}-${entry.endTime} excede el horario del grupo para el ${DAY_ES[entry.weekDay] ?? entry.weekDay}` },
         { status: 400 }
       )
     }

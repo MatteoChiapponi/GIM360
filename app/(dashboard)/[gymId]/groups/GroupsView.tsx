@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useFetch } from "@/hooks/useFetch"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
+import { NumberInput } from "@/components/ui/NumberInput"
 import { FormField } from "@/components/ui/FormField"
 import { StatCard } from "@/components/ui/StatCard"
 import { PageHeader } from "@/components/ui/PageHeader"
@@ -169,10 +170,10 @@ export default function GroupsView({ gymId }: { gymId: string }) {
           <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ej: Nivel Inicial" />
         </FormField>
         <FormField label="Precio mensual" required>
-          <Input type="number" min="0" step="0.01" value={form.monthlyPrice} onChange={(e) => setForm((f) => ({ ...f, monthlyPrice: e.target.value }))} placeholder="Ej: 15000" />
+          <NumberInput value={form.monthlyPrice} onChange={(e) => setForm((f) => ({ ...f, monthlyPrice: e.target.value }))} placeholder="Ej: 15000" />
         </FormField>
         <FormField label="Capacidad máx.">
-          <Input type="number" min="1" value={form.maxCapacity} onChange={(e) => setForm((f) => ({ ...f, maxCapacity: e.target.value }))} placeholder="Sin límite" />
+          <NumberInput integer value={form.maxCapacity} onChange={(e) => setForm((f) => ({ ...f, maxCapacity: e.target.value }))} placeholder="Sin límite" />
         </FormField>
       </FormModal>
 

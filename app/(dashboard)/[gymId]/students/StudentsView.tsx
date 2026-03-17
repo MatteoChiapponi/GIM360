@@ -5,6 +5,7 @@ import { useFetch } from "@/hooks/useFetch"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
 import { FormField } from "@/components/ui/FormField"
+import { NumberInput } from "@/components/ui/NumberInput"
 import { Select } from "@/components/ui/Select"
 import { StatCard } from "@/components/ui/StatCard"
 import { StatusDot } from "@/components/ui/StatusDot"
@@ -360,7 +361,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
           <Input value={form.lastName} onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))} placeholder="Ej: García" />
         </FormField>
         <FormField label="Día de cobro" required>
-          <Input type="number" min="1" max="31" value={form.dueDay} onChange={(e) => setForm((f) => ({ ...f, dueDay: e.target.value }))} placeholder="Ej: 10" />
+          <NumberInput integer value={form.dueDay} onChange={(e) => setForm((f) => ({ ...f, dueDay: e.target.value }))} placeholder="Ej: 10" />
         </FormField>
         <FormField label="Teléfono">
           <Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Ej: 11 1234-5678" />
@@ -634,7 +635,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
           <Input value={editForm.lastName} onChange={(e) => setEditForm((f) => ({ ...f, lastName: e.target.value }))} placeholder="Ej: García" />
         </FormField>
         <FormField label="Día de cobro" required>
-          <Input type="number" min="1" max="31" value={editForm.dueDay} onChange={(e) => setEditForm((f) => ({ ...f, dueDay: e.target.value }))} placeholder="Ej: 10" />
+          <NumberInput integer value={editForm.dueDay} onChange={(e) => setEditForm((f) => ({ ...f, dueDay: e.target.value }))} placeholder="Ej: 10" />
         </FormField>
         <FormField label="Teléfono">
           <Input value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Ej: 11 1234-5678" />

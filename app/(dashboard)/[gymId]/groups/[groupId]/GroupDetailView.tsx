@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
+import { NumberInput } from "@/components/ui/NumberInput"
 import { Select } from "@/components/ui/Select"
 import { Label } from "@/components/ui/Label"
 import { FormField } from "@/components/ui/FormField"
@@ -169,10 +170,10 @@ function InfoTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
           <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ej: Nivel Inicial" />
         </FormField>
         <FormField label="Precio mensual" required>
-          <Input type="number" min="0" step="0.01" value={form.monthlyPrice} onChange={(e) => setForm((f) => ({ ...f, monthlyPrice: e.target.value }))} placeholder="Ej: 15000" />
+          <NumberInput value={form.monthlyPrice} onChange={(e) => setForm((f) => ({ ...f, monthlyPrice: e.target.value }))} placeholder="Ej: 15000" />
         </FormField>
         <FormField label="Capacidad máx.">
-          <Input type="number" min="1" value={form.maxCapacity} onChange={(e) => setForm((f) => ({ ...f, maxCapacity: e.target.value }))} placeholder="Sin límite" />
+          <NumberInput integer value={form.maxCapacity} onChange={(e) => setForm((f) => ({ ...f, maxCapacity: e.target.value }))} placeholder="Sin límite" />
         </FormField>
       </FormModal>
     </>
@@ -498,27 +499,19 @@ function TrainerAssignForm({
   gymTrainers,
   loadingTrainers,
   group,
-  initialForm,
+  form,
   editMode,
   onFormChange,
 }: {
   gymTrainers: GymTrainer[]
   loadingTrainers: boolean
   group: GroupDetail
-  initialForm: TrainerFormState
+  form: TrainerFormState
   editMode: boolean
   onFormChange: (form: TrainerFormState) => void
 }) {
-  const [form, setForm] = useState<TrainerFormState>(initialForm)
-
-  useEffect(() => { setForm(initialForm) }, [initialForm])
-
   function updateForm(updater: (prev: TrainerFormState) => TrainerFormState) {
-    setForm((prev) => {
-      const next = updater(prev)
-      onFormChange(next)
-      return next
-    })
+    onFormChange(updater(form))
   }
 
   // Build a lookup: which days are in the group's schedules and their times
@@ -585,10 +578,7 @@ function TrainerAssignForm({
               </FormField>
             )}
             <FormField label="Tarifa por hora" required>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
+              <NumberInput
                 value={form.hourlyRate}
                 onChange={(e) => updateForm((f) => ({ ...f, hourlyRate: e.target.value }))}
                 placeholder="Ej: 2000"
@@ -744,17 +734,19 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
     if (err) { setAssignError(err); return }
 
     setAssigning(true)
-    const body = {
-      trainerId: assignFormCurrent.trainerId,
-      hourlyRate: Number(assignFormCurrent.hourlyRate),
-      schedules: buildSchedulesPayload(assignFormCurrent.days),
-    }
-    const res = await fetch(`/api/groups/${groupId}/trainers?gymId=${gymId}`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    })
-    if (res.ok) { setShowForm(false); await onRefresh() }
-    else { const d = await res.json().catch(() => ({})); setAssignError(d?.error ?? "Error al asignar el entrenador.") }
-    setAssigning(false)
+    try {
+      const body = {
+        trainerId: assignFormCurrent.trainerId,
+        hourlyRate: Number(assignFormCurrent.hourlyRate),
+        schedules: buildSchedulesPayload(assignFormCurrent.days),
+      }
+      const res = await fetch(`/api/groups/${groupId}/trainers?gymId=${gymId}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      })
+      if (res.ok) { setShowForm(false); await onRefresh() }
+      else { const d = await res.json().catch(() => ({})); setAssignError(d?.error ?? "Error al asignar el entrenador.") }
+    } catch { setAssignError("Error de red.") }
+    finally { setAssigning(false) }
   }
 
   async function handleEdit(e: React.FormEvent) {
@@ -765,16 +757,18 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
     if (err) { setEditError(err); return }
 
     setAssigning(true)
-    const body = {
-      hourlyRate: Number(editFormCurrent.hourlyRate),
-      schedules: buildSchedulesPayload(editFormCurrent.days),
-    }
-    const res = await fetch(`/api/groups/${groupId}/trainers/${editingTrainer.trainer.id}?gymId=${gymId}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    })
-    if (res.ok) { setShowEditModal(false); setEditingTrainer(null); await onRefresh() }
-    else { const d = await res.json().catch(() => ({})); setEditError(d?.error ?? "Error al actualizar el entrenador.") }
-    setAssigning(false)
+    try {
+      const body = {
+        hourlyRate: Number(editFormCurrent.hourlyRate),
+        schedules: buildSchedulesPayload(editFormCurrent.days),
+      }
+      const res = await fetch(`/api/groups/${groupId}/trainers/${editingTrainer.trainer.id}?gymId=${gymId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      })
+      if (res.ok) { setShowEditModal(false); setEditingTrainer(null); await onRefresh() }
+      else { const d = await res.json().catch(() => ({})); setEditError(d?.error ?? "Error al actualizar el entrenador.") }
+    } catch { setEditError("Error de red.") }
+    finally { setAssigning(false) }
   }
 
   async function handleRemove(trainerId: string) {
@@ -815,7 +809,7 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
           gymTrainers={gymTrainers}
           loadingTrainers={loadingPicker}
           group={group}
-          initialForm={assignFormCurrent}
+          form={assignFormCurrent}
           editMode={false}
           onFormChange={setAssignFormCurrent}
         />
@@ -836,7 +830,7 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
             gymTrainers={[]}
             loadingTrainers={false}
             group={group}
-            initialForm={buildEditTrainerForm(editingTrainer)}
+            form={editFormCurrent}
             editMode={true}
             onFormChange={setEditFormCurrent}
           />

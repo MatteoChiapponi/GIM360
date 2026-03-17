@@ -1,11 +1,13 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { useFetch } from "@/hooks/useFetch"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
 import { Label } from "@/components/ui/Label"
 import { FormField } from "@/components/ui/FormField"
+import { NumberInput } from "@/components/ui/NumberInput"
 import { Select } from "@/components/ui/Select"
 import { PageHeader } from "@/components/ui/PageHeader"
 import { SearchToolbar } from "@/components/ui/SearchToolbar"
@@ -76,6 +78,7 @@ function formatCurrency(n: number): string {
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function TrainersView({ gymId }: { gymId: string }) {
+  const router = useRouter()
   const { data: trainers, loading, error, refetch } = useFetch<Trainer[]>(
     `/api/trainers?gymId=${gymId}`, [], "No se pudieron cargar los entrenadores.",
   )
@@ -323,8 +326,7 @@ export default function TrainersView({ gymId }: { gymId: string }) {
                   </Select>
                 </FormField>
                 <FormField label="Tarifa por hora" required>
-                  <Input
-                    type="number" min="0" step="0.01"
+                  <NumberInput
                     value={assignForm.hourlyRate}
                     onChange={(e) => setAssignForm((f) => ({ ...f, hourlyRate: e.target.value }))}
                     placeholder="Ej: 2000"
@@ -472,7 +474,7 @@ export default function TrainersView({ gymId }: { gymId: string }) {
                       const monthlyCost = rate * monthlyHours
 
                       return (
-                        <div key={tg.id} className="rounded-lg border border-[#E5E4E0] bg-white p-4 space-y-3">
+                        <div key={tg.id} onClick={() => router.push(`/${gymId}/groups/${tg.group.id}`)} className="rounded-lg border border-[#E5E4E0] bg-white p-4 space-y-3 cursor-pointer hover:border-[#C8C7C3] hover:shadow-sm transition-all">
                           <div className="flex items-center justify-between">
                             <span className="font-medium text-[#111110]">{tg.group.name}</span>
                             <span className="font-mono text-sm text-[#111110]">{formatCurrency(monthlyCost)}/mes</span>
