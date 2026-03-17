@@ -82,10 +82,10 @@ function fmtCurrency(value: string | number) {
 type SimpleGroup = { id: string; name: string }
 
 type FilterTab = "ACTIVOS" | "TODOS"
-type NewForm = { firstName: string; lastName: string; dueDay: string; phone: string; groupId: string }
+type NewForm = { firstName: string; lastName: string; dueDay: string; phone: string; groupId: string; fichaFile: File | null; aptoFile: File | null }
 type EditForm = { firstName: string; lastName: string; dueDay: string; phone: string }
 
-const EMPTY_FORM: NewForm = { firstName: "", lastName: "", dueDay: "", phone: "", groupId: "" }
+const EMPTY_FORM: NewForm = { firstName: "", lastName: "", dueDay: "", phone: "", groupId: "", fichaFile: null, aptoFile: null }
 const EMPTY_EDIT: EditForm = { firstName: "", lastName: "", dueDay: "", phone: "" }
 
 export default function StudentsView({ gymId }: { gymId: string }) {
@@ -310,6 +310,24 @@ export default function StudentsView({ gymId }: { gymId: string }) {
       }
     }
 
+    // Optional: upload files
+    const filesToUpload: { fileType: StudentFileType; file: File }[] = []
+    if (form.fichaFile) filesToUpload.push({ fileType: "FICHA", file: form.fichaFile })
+    if (form.aptoFile) filesToUpload.push({ fileType: "APTO_MEDICO", file: form.aptoFile })
+    for (const { fileType, file } of filesToUpload) {
+      const fd = new FormData()
+      fd.append("gymId", gymId)
+      fd.append("fileType", fileType)
+      fd.append("file", file)
+      const uploadRes = await fetch(`/api/students/${created.id}/files`, { method: "POST", body: fd })
+      if (!uploadRes.ok) {
+        setFormError("Alumno creado, pero no se pudo subir uno o más archivos.")
+        setSubmitting(false)
+        await refetch()
+        return
+      }
+    }
+
     setForm(EMPTY_FORM); setShowForm(false); await refetch()
     setSubmitting(false)
   }
@@ -372,6 +390,54 @@ export default function StudentsView({ gymId }: { gymId: string }) {
             {gymGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
           </Select>
         </FormField>
+
+        {/* File upload section — spans both columns */}
+        <div className="col-span-full border-t border-[#F0EFEB] pt-4 space-y-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Documentos</p>
+          <p className="text-xs text-[#A5A49D] -mt-2">Formatos: PDF, JPG, PNG, WEBP. Máx. 10 MB</p>
+
+          <FormField label="Ficha de alumno">
+            <div className="flex items-center gap-3">
+              <label className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg border border-[#E5E4E0] bg-white px-3 py-2 text-sm font-medium text-[#68685F] hover:text-[#111110] hover:bg-[#FAFAF9] transition-colors shrink-0">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 7.4 8.1 13.8a3.5 3.5 0 0 1-5-5L9.6 2.4a2.33 2.33 0 0 1 3.3 3.3l-6.4 6.4a1.17 1.17 0 0 1-1.7-1.6l6-6.1"/></svg>
+                Adjuntar
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null
+                    setForm((prev) => ({ ...prev, fichaFile: f }))
+                  }}
+                />
+              </label>
+              <span className="text-sm text-[#A5A49D] truncate min-w-0">
+                {form.fichaFile ? form.fichaFile.name : "Ningún archivo seleccionado"}
+              </span>
+            </div>
+          </FormField>
+
+          <FormField label="Apto médico">
+            <div className="flex items-center gap-3">
+              <label className="cursor-pointer inline-flex items-center gap-1.5 rounded-lg border border-[#E5E4E0] bg-white px-3 py-2 text-sm font-medium text-[#68685F] hover:text-[#111110] hover:bg-[#FAFAF9] transition-colors shrink-0">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 7.4 8.1 13.8a3.5 3.5 0 0 1-5-5L9.6 2.4a2.33 2.33 0 0 1 3.3 3.3l-6.4 6.4a1.17 1.17 0 0 1-1.7-1.6l6-6.1"/></svg>
+                Adjuntar
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null
+                    setForm((prev) => ({ ...prev, aptoFile: f }))
+                  }}
+                />
+              </label>
+              <span className="text-sm text-[#A5A49D] truncate min-w-0">
+                {form.aptoFile ? form.aptoFile.name : "Ningún archivo seleccionado"}
+              </span>
+            </div>
+          </FormField>
+        </div>
       </FormModal>
 
       <DataTable
@@ -557,7 +623,8 @@ export default function StudentsView({ gymId }: { gymId: string }) {
                             <div key={type} className="rounded-lg border border-[#E5E4E0] bg-[#FAFAF9] p-3 space-y-2">
                               <div className="flex items-center justify-between">
                                 <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[#68685F]">{label}</span>
-                                <label htmlFor={inputId} className={`cursor-pointer text-xs font-medium px-2.5 py-1 rounded border border-[#E5E4E0] bg-white text-[#111110] hover:bg-[#F0EFEB] transition-colors ${uploadingType === type ? "opacity-50 pointer-events-none" : ""}`}>
+                                <label htmlFor={inputId} className={`cursor-pointer inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded border border-[#E5E4E0] bg-white text-[#111110] hover:bg-[#F0EFEB] transition-colors ${uploadingType === type ? "opacity-50 pointer-events-none" : ""}`}>
+                                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 7.4 8.1 13.8a3.5 3.5 0 0 1-5-5L9.6 2.4a2.33 2.33 0 0 1 3.3 3.3l-6.4 6.4a1.17 1.17 0 0 1-1.7-1.6l6-6.1"/></svg>
                                   {uploadingType === type ? "Subiendo…" : "Subir"}
                                 </label>
                                 <input

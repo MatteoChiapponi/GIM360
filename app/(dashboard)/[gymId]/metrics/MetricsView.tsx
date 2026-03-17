@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react"
-import { createPortal } from "react-dom"
+import { useState, useEffect, useCallback } from "react"
 import { Input } from "@/components/ui/Input"
 import { Label } from "@/components/ui/Label"
+import { InfoTooltip } from "@/components/ui/InfoTooltip"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,66 +33,6 @@ function fmt(n: number) {
 
 function pct(n: number) { return `${Math.round(n * 100)}%` }
 
-// ─── Tooltip (hover on desktop, tap on mobile) ──────────────────────────────
-
-function InfoTooltip({ text }: { text: string }) {
-  const [open, setOpen] = useState(false)
-  const [hover, setHover] = useState(false)
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const tooltipRef = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
-
-  const visible = open || hover
-
-  // Position the portal tooltip below the trigger
-  useLayoutEffect(() => {
-    if (!visible || !triggerRef.current) { setPos(null); return }
-    const rect = triggerRef.current.getBoundingClientRect()
-    setPos({ top: rect.bottom + 8, left: rect.left + rect.width / 2 })
-  }, [visible])
-
-  // Close on outside click (mobile)
-  useEffect(() => {
-    if (!open) return
-    function handleOutside(e: PointerEvent) {
-      if (triggerRef.current?.contains(e.target as Node)) return
-      if (tooltipRef.current?.contains(e.target as Node)) return
-      setOpen(false)
-    }
-    document.addEventListener("pointerdown", handleOutside)
-    return () => document.removeEventListener("pointerdown", handleOutside)
-  }, [open])
-
-  return (
-    <>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="inline-flex items-center justify-center cursor-default touch-manipulation"
-        onClick={() => setOpen(o => !o)}
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
-        aria-label="Más información"
-      >
-        <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" className={`transition-opacity shrink-0 ${visible ? "opacity-80" : "opacity-40"}`}>
-          <circle cx="6" cy="6" r="5.5" stroke="currentColor" strokeWidth="1" fill="none"/>
-          <text x="6" y="9" textAnchor="middle" fontSize="8" fontWeight="600">?</text>
-        </svg>
-      </button>
-      {visible && pos && createPortal(
-        <div
-          ref={tooltipRef}
-          style={{ position: "fixed", top: pos.top, left: pos.left, transform: "translateX(-50%)" }}
-          className="w-56 rounded-lg bg-[#111110] px-3 py-2 text-[11px] font-normal normal-case tracking-normal text-white shadow-lg z-[9999] text-left leading-relaxed"
-        >
-          {text}
-        </div>,
-        document.body
-      )}
-    </>
-  )
-}
-
 // ─── Metric Card ─────────────────────────────────────────────────────────────
 
 function MetricStatCard({ label, value, tooltip, highlight }: {
@@ -104,8 +44,8 @@ function MetricStatCard({ label, value, tooltip, highlight }: {
   return (
     <div className="relative rounded-xl border border-[#E5E4E0] bg-white px-5 py-4 overflow-hidden flex flex-col">
       <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl" style={{ backgroundColor: accentColor }} />
-      <p className="min-h-[2rem] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D] flex items-start gap-1">
-        {label}
+      <p className="min-h-[2rem] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D] flex items-start justify-between">
+        <span>{label}</span>
         {tooltip && <InfoTooltip text={tooltip} />}
       </p>
       <p className={`mt-auto text-2xl font-bold font-mono ${valueColor}`}>{value}</p>

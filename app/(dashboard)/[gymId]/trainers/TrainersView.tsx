@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/Input"
 import { Label } from "@/components/ui/Label"
 import { FormField } from "@/components/ui/FormField"
 import { NumberInput } from "@/components/ui/NumberInput"
+import { InfoTooltip } from "@/components/ui/InfoTooltip"
 import { Select } from "@/components/ui/Select"
 import { PageHeader } from "@/components/ui/PageHeader"
 import { SearchToolbar } from "@/components/ui/SearchToolbar"
@@ -274,7 +275,7 @@ export default function TrainersView({ gymId }: { gymId: string }) {
           <p className="mt-1 text-2xl font-semibold text-[#111110]">{activeCount}</p>
         </div>
         <div className="rounded-xl border border-[#E5E4E0] bg-white px-5 py-4">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Costo mensual est.</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D] flex items-center justify-between"><span>Costo mensual est.</span> <InfoTooltip text="Estimación del costo mensual total de entrenadores. Se calcula sumando las horas semanales asignadas × tarifa por hora × 4,33 semanas/mes para cada entrenador." /></p>
           <p className="mt-1 text-2xl font-semibold text-[#111110]">{formatCurrency(totalMonthlyCost)}</p>
         </div>
       </div>
