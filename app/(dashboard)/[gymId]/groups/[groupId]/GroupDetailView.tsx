@@ -614,7 +614,7 @@ function TrainerAssignForm({
                 <button
                   type="button"
                   onClick={coverAll}
-                  className="self-start rounded-md border border-[#E5E4E0] px-3 py-1.5 text-xs font-medium text-[#68685F] hover:bg-[#F0EFEB] hover:text-[#111110] transition-colors sm:self-auto"
+                  className="cursor-pointer self-start rounded-md border border-[#E5E4E0] px-3 py-1.5 text-xs font-medium text-[#68685F] hover:bg-[#F0EFEB] hover:text-[#111110] transition-colors sm:self-auto"
                 >
                   Cubrir todo el grupo
                 </button>
@@ -897,7 +897,7 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
                     <div className="flex items-center justify-end gap-2">
                       <button
                         onClick={() => handleShowEditForm(t)}
-                        className="min-h-[36px] rounded-lg border border-[#E5E4E0] bg-white px-3 py-1.5 text-xs font-medium text-[#68685F] hover:text-[#111110] transition-colors"
+                        className="cursor-pointer min-h-[36px] rounded-lg border border-[#E5E4E0] bg-white px-3 py-1.5 text-xs font-medium text-[#68685F] hover:text-[#111110] transition-colors"
                       >
                         Editar
                       </button>

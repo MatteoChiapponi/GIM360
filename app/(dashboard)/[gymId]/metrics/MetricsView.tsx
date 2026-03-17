@@ -20,10 +20,9 @@ type GroupMetrics = {
   monthlyHours: number; trainerCost: number; margin: number
 }
 
-type MetricView = "general" | "gimnasio" | "grupos"
+type MetricView = "gimnasio" | "grupos"
 
 const VIEWS: { id: MetricView; label: string }[] = [
-  { id: "general", label: "General" },
   { id: "gimnasio", label: "Gimnasio" },
   { id: "grupos", label: "Grupos" },
 ]
@@ -72,11 +71,17 @@ function CollectionProgress({ collected, total }: { collected: number; total: nu
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
+function formatPeriod(period: string) {
+  const [year, month] = period.split("-")
+  const date = new Date(Number(year), Number(month) - 1, 1)
+  return date.toLocaleDateString("es-AR", { month: "long", year: "numeric" })
+}
+
 export default function MetricsView({ gymId }: { gymId: string }) {
   const now = new Date()
   const maxPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
   const [period, setPeriod] = useState(maxPeriod)
-  const [activeView, setActiveView] = useState<MetricView>("general")
+  const [activeView, setActiveView] = useState<MetricView>("gimnasio")
   const [gymMetrics, setGymMetrics] = useState<GymMetrics | null>(null)
   const [groupMetrics, setGroupMetrics] = useState<GroupMetrics[]>([])
   const [loading, setLoading] = useState(false)
@@ -101,18 +106,21 @@ export default function MetricsView({ gymId }: { gymId: string }) {
   const ebitdaHighlight = gymMetrics === null ? "neutral" : gymMetrics.ebitda >= 0 ? "positive" : "negative"
   const totalRevenue = gymMetrics ? gymMetrics.totalCollectedRevenue + gymMetrics.totalPendingRevenue : 0
   const totalGroupMargin = groupMetrics.reduce((s, g) => s + g.margin, 0)
-  const totalStudents = groupMetrics.reduce((s, g) => s + g.activeStudents, 0)
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-[#111110]">Métricas</h1>
-          <p className="mt-0.5 text-sm text-[#68685F]">Rentabilidad y costos del gimnasio</p>
+          <div className="flex items-baseline gap-3">
+            <h1 className="text-xl font-semibold text-[#111110]">Métricas</h1>
+            <span className="text-xl text-[#C8C7C3]">/</span>
+            <span className="text-xl font-semibold capitalize text-[#68685F]">{formatPeriod(period)}</span>
+          </div>
+          <p className="mt-0.5 text-sm text-[#A5A49D]">Rentabilidad y costos del gimnasio</p>
         </div>
         <div className="flex items-center gap-2">
-          <Label htmlFor="period">Período</Label>
+          <Label htmlFor="period">Mes</Label>
           <Input id="period" type="month" value={period} max={maxPeriod} onChange={(e) => setPeriod(e.target.value > maxPeriod ? maxPeriod : e.target.value)} className="py-2" />
         </div>
       </div>
@@ -134,86 +142,6 @@ export default function MetricsView({ gymId }: { gymId: string }) {
         <div className="py-20 text-center text-sm text-[#A5A49D]">Cargando métricas…</div>
       ) : gymMetrics ? (
         <>
-          {/* ── GENERAL ── */}
-          {activeView === "general" && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                {/* EBITDA hero card */}
-                <div className="relative rounded-xl border border-[#E5E4E0] bg-white px-6 py-5 overflow-hidden"
-                  style={{ borderLeftColor: gymMetrics.ebitda >= 0 ? "#10b981" : "#ef4444", borderLeftWidth: 3 }}>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">EBITDA del período</p>
-                  <p className={`mt-2 text-3xl font-bold font-mono ${gymMetrics.ebitda >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmt(gymMetrics.ebitda)}</p>
-                  <p className="mt-1 text-[11px] text-[#C8C7C3]">cobrado − entrenadores − fijos</p>
-                </div>
-
-                {/* Ingresos */}
-                <div className="rounded-xl border border-[#E5E4E0] bg-white px-5 py-4 space-y-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Ingresos</p>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-xs text-[#68685F]">Cobrados</span>
-                    <span className="font-mono font-semibold text-emerald-700 text-sm">{fmt(gymMetrics.totalCollectedRevenue)}</span>
-                  </div>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-xs text-[#68685F]">Pendientes</span>
-                    <span className="font-mono font-semibold text-[#111110] text-sm">{fmt(gymMetrics.totalPendingRevenue)}</span>
-                  </div>
-                  <div className="h-px bg-[#F0EFEB]" />
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-xs font-medium text-[#68685F]">Total</span>
-                    <span className="font-mono font-bold text-[#111110] text-sm">{fmt(totalRevenue)}</span>
-                  </div>
-                </div>
-
-                {/* Costos */}
-                <div className="rounded-xl border border-[#E5E4E0] bg-white px-5 py-4 space-y-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Costos</p>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-xs text-[#68685F]">Entrenadores</span>
-                    <span className="font-mono font-semibold text-red-700 text-sm">{fmt(gymMetrics.totalTrainerCost)}</span>
-                  </div>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-xs text-[#68685F]">Gastos fijos</span>
-                    <span className="font-mono font-semibold text-red-700 text-sm">{fmt(gymMetrics.totalFixedExpenses)}</span>
-                  </div>
-                  <div className="h-px bg-[#F0EFEB]" />
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-xs font-medium text-[#68685F]">Total</span>
-                    <span className="font-mono font-bold text-red-700 text-sm">{fmt(gymMetrics.totalTrainerCost + gymMetrics.totalFixedExpenses)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {totalRevenue > 0 && <CollectionProgress collected={gymMetrics.totalCollectedRevenue} total={totalRevenue} />}
-
-              {groupMetrics.length > 0 && (
-                <div className="rounded-xl border border-[#E5E4E0] bg-white overflow-hidden">
-                  <div className="px-5 py-3.5 border-b border-[#F0EFEB] flex items-center justify-between">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Grupos · resumen</p>
-                    <button onClick={() => setActiveView("grupos")} className="cursor-pointer text-xs font-medium text-[#68685F] hover:text-[#111110] transition-colors">Ver detalle →</button>
-                  </div>
-                  <div className="divide-y divide-[#F7F6F3]">
-                    {groupMetrics.map((g) => (
-                      <div key={g.groupId} className="flex items-center justify-between px-5 py-3">
-                        <div className="flex items-center gap-3">
-                          <p className="text-sm font-medium text-[#111110]">{g.groupName}</p>
-                          <p className="text-xs text-[#A5A49D]">{g.activeStudents} alumnos</p>
-                        </div>
-                        <span className={`text-sm font-mono font-semibold ${g.margin >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmt(g.margin)}</span>
-                      </div>
-                    ))}
-                    <div className="flex items-center justify-between px-5 py-3 bg-[#F7F6F3]">
-                      <div className="flex items-center gap-3">
-                        <p className="text-sm font-semibold text-[#68685F]">Total</p>
-                        <p className="text-xs text-[#A5A49D]">{totalStudents} alumnos</p>
-                      </div>
-                      <span className={`text-sm font-mono font-bold ${totalGroupMargin >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmt(totalGroupMargin)}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* ── GIMNASIO ── */}
           {activeView === "gimnasio" && (
             <div className="space-y-6">

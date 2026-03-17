@@ -40,7 +40,7 @@ export default function DashboardPage() {
           </span>
           <button
             onClick={() => signOut({ callbackUrl: "/login" })}
-            className="text-xs font-medium text-[#68685F] hover:text-[#111110] transition-colors min-h-[44px] px-2 flex items-center"
+            className="cursor-pointer text-xs font-medium text-[#68685F] hover:text-[#111110] transition-colors min-h-[44px] px-2 flex items-center"
           >
             Cerrar sesión
           </button>
@@ -85,7 +85,7 @@ export default function DashboardPage() {
 
                   {isActive && (
                     <Link
-                      href={`/${gym.id}/payments`}
+                      href={`/${gym.id}/metrics`}
                       className="flex items-center gap-1.5 text-sm font-medium text-[#111110] hover:text-[#68685F] transition-colors"
                     >
                       Ingresar

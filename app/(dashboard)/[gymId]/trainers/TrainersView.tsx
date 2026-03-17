@@ -225,7 +225,7 @@ export default function TrainersView({ gymId }: { gymId: string }) {
                   <span key={tg.id} className="inline-block text-xs bg-[#F7F6F3] text-[#68685F] px-2 py-0.5 rounded-full">{tg.group.name}</span>
                 ))}</div>
           )},
-          { key: "pay", header: "Costo/mes", align: "right", render: (t) => (
+          { key: "pay", header: "Costo/mes Est.", align: "right", render: (t) => (
             <span className="font-mono text-[#111110]">{t.groups.length > 0 ? formatCurrency(computeMonthlyPay(t.groups)) : "—"}</span>
           )},
         ]}

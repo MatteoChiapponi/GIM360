@@ -1,4 +1,5 @@
 import { db } from "@/lib/db"
+import { expireOverduePayments } from "@/modules/payments/payments.service"
 import type { MetricsQueryInput } from "../metrics.schema"
 
 /** Parses "YYYY-MM" into the first-day-of-month Date (UTC) */
@@ -66,6 +67,9 @@ export type GroupMetrics = {
 export async function getGroupMetrics(input: MetricsQueryInput): Promise<GroupMetrics[]> {
   const periodDate = parsePeriod(input.period)
 
+  // Expire overdue payments before aggregating, consistent with PaymentsView
+  await expireOverduePayments(input.gymId, input.period)
+
   const [groups, paidPayments] = await Promise.all([
     db.group.findMany({
       where: { gymId: input.gymId },
@@ -77,6 +81,7 @@ export async function getGroupMetrics(input: MetricsQueryInput): Promise<GroupMe
           },
         },
         trainers: {
+          where: { trainer: { active: true } },
           include: {
             trainer: { select: { id: true, name: true } },
             schedules: { select: { weekDay: true, startTime: true, endTime: true } },

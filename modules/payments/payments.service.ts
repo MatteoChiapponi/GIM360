@@ -53,7 +53,7 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
 }
 
 /** Expires any PENDING payments whose due date has already passed */
-async function expireOverduePayments(gymId: string, period: string) {
+export async function expireOverduePayments(gymId: string, period: string) {
   const periodDate = parsePeriod(period)
   const [year, month] = period.split("-").map(Number)
   const now = new Date()

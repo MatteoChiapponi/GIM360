@@ -1,4 +1,5 @@
 import { db } from "@/lib/db"
+import { expireOverduePayments } from "@/modules/payments/payments.service"
 import type { MetricsQueryInput } from "../metrics.schema"
 
 /** Parses "YYYY-MM" into the first-day-of-month Date (UTC) */
@@ -47,6 +48,9 @@ export type GymMetrics = {
  */
 export async function getGymMetrics(input: MetricsQueryInput): Promise<GymMetrics> {
   const periodDate = parsePeriod(input.period)
+
+  // Expire overdue payments before aggregating, consistent with PaymentsView
+  await expireOverduePayments(input.gymId, input.period)
 
   const [paidAgg, pendingAgg, trainers, fixedExpenses] = await Promise.all([
     db.payment.aggregate({

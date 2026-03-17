@@ -85,8 +85,9 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
   const paid = payments.filter((p) => p.status === "PAID").length
   const pending = payments.filter((p) => p.status === "PENDING").length
   const expired = payments.filter((p) => p.status === "EXPIRED").length
-  const total = payments.reduce((sum, p) => sum + Number(p.amount), 0)
   const collected = payments.filter((p) => p.status === "PAID").reduce((sum, p) => sum + Number(p.amount), 0)
+  const pendingAmount = payments.filter((p) => p.status === "PENDING").reduce((sum, p) => sum + Number(p.amount), 0)
+  const total = collected + pendingAmount
   const collectionPct = total > 0 ? Math.round((collected / total) * 100) : 0
 
   return (

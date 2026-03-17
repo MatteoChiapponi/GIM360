@@ -58,7 +58,7 @@ export function NavLinks({ gymId }: { gymId: string }) {
         <button
           onClick={() => setOpen((v) => !v)}
           aria-label="Menú"
-          className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#E5E4E0] bg-white text-[#68685F] hover:bg-[#F0EFEB] transition-colors"
+          className="cursor-pointer flex h-9 w-9 items-center justify-center rounded-lg border border-[#E5E4E0] bg-white text-[#68685F] hover:bg-[#F0EFEB] transition-colors"
         >
           {open ? (
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
