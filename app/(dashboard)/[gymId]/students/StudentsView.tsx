@@ -654,12 +654,13 @@ export default function StudentsView({ gymId }: { gymId: string }) {
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           title="Ver archivo"
-                                          className="text-[#A5A49D] hover:text-[#111110] transition-colors"
+                                          className="inline-flex items-center gap-1 text-xs text-[#68685F] hover:text-[#111110] transition-colors"
                                         >
-                                          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                                             <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5Z"/>
                                             <circle cx="8" cy="8" r="2"/>
                                           </svg>
+                                          Ver
                                         </a>
                                         <button
                                           onClick={() => setConfirmFileId(f.id)}

@@ -475,7 +475,7 @@ export default function TrainersView({ gymId }: { gymId: string }) {
                       const monthlyCost = rate * monthlyHours
 
                       return (
-                        <div key={tg.id} onClick={() => router.push(`/${gymId}/groups/${tg.group.id}`)} className="rounded-lg border border-[#E5E4E0] bg-white p-4 space-y-3 cursor-pointer hover:border-[#C8C7C3] hover:shadow-sm transition-all">
+                        <div key={tg.id} onClick={() => { closeDetail(); router.push(`/${gymId}/groups/${tg.group.id}`) }} className="rounded-lg border border-[#E5E4E0] bg-white p-4 space-y-3 cursor-pointer hover:border-[#C8C7C3] hover:shadow-sm active:bg-[#F7F6F3] transition-all">
                           <div className="flex items-center justify-between">
                             <span className="font-medium text-[#111110]">{tg.group.name}</span>
                             <span className="font-mono text-sm text-[#111110]">{formatCurrency(monthlyCost)}/mes</span>
@@ -508,8 +508,9 @@ export default function TrainersView({ gymId }: { gymId: string }) {
                             </div>
                           </div>
 
-                          <div className="text-[11px] text-[#A5A49D] border-t border-[#F0EFEB] pt-2">
-                            {formatCurrency(rate)}/h × {(totalMinutes / 60).toFixed(1)}h/sem × 4,33 = {formatCurrency(monthlyCost)}/mes
+                          <div className="flex items-center justify-between text-[11px] text-[#A5A49D] border-t border-[#F0EFEB] pt-2">
+                            <span>{formatCurrency(rate)}/h × {(totalMinutes / 60).toFixed(1)}h/sem × 4,33 = {formatCurrency(monthlyCost)}/mes</span>
+                            <span className="text-[#68685F] font-medium flex items-center gap-0.5">Ver grupo <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4l4 4-4 4"/></svg></span>
                           </div>
                         </div>
                       )
