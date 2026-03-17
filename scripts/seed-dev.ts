@@ -384,7 +384,6 @@ async function main() {
       nationalId: "39222333",
       joinedAt: date(2025, 6, 1),
       dueDay: 1,
-      medicalClearance: "APPROVED" as const,
       groups: [groupCompetition.id],
     },
     {
@@ -394,7 +393,6 @@ async function main() {
       nationalId: "40444555",
       joinedAt: date(2025, 9, 1),
       dueDay: 1,
-      medicalClearance: "APPROVED" as const,
       groups: [groupCompetition.id],
     },
     {
@@ -403,7 +401,6 @@ async function main() {
       phone: "1167893456",
       joinedAt: date(2026, 1, 10),
       dueDay: 10,
-      medicalClearance: "PENDING" as const,
       groups: [groupCompetition.id],
     },
     // Baby Gym
@@ -449,7 +446,6 @@ async function main() {
       nationalId: "39888999",
       joinedAt: date(2025, 10, 1),
       dueDay: 1,
-      medicalClearance: "APPROVED" as const,
       groups: [groupAdvanced.id, groupCompetition.id],
     },
     // Inactive student

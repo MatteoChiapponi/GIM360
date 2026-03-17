@@ -2,10 +2,25 @@ import { NextRequest, NextResponse } from "next/server"
 import { UserRole } from "@/app/generated/prisma/client"
 import { withAuthParams } from "@/lib/with-auth"
 import { gymBelongsToOwner, studentBelongsToGym } from "@/modules/belongs/belongs.service"
-import { updateStudent, deactivateStudent } from "@/modules/students/students.service"
+import { getStudentById, updateStudent, deactivateStudent } from "@/modules/students/students.service"
 import { updateStudentSchema } from "@/modules/students/students.schema"
 
 type Params = { id: string }
+
+export const GET = withAuthParams<Params>([UserRole.OWNER], async (req, session, { id }) => {
+  const gymId = req.nextUrl.searchParams.get("gymId")
+  if (!gymId) return NextResponse.json({ error: "gymId required" }, { status: 400 })
+
+  if (!await gymBelongsToOwner(gymId, session.user.id))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+  if (!await studentBelongsToGym(id, gymId))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+  const student = await getStudentById(id)
+  if (!student) return NextResponse.json({ error: "Not found" }, { status: 404 })
+  return NextResponse.json(student)
+})
 
 export const PATCH = withAuthParams<Params>([UserRole.OWNER], async (req, session, { id }) => {
   const gymId = req.nextUrl.searchParams.get("gymId")

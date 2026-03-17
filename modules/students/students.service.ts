@@ -5,13 +5,25 @@ export async function getStudentsByGym(gymId: string) {
   return db.student.findMany({
     where: { gymId },
     orderBy: { lastName: "asc" },
+    include: {
+      files: { select: { fileType: true } },
+    },
   })
 }
 
 export async function getStudentById(id: string) {
   return db.student.findFirst({
     where: { id },
-    include: { groups: { include: { group: true } } },
+    include: {
+      groups: {
+        include: {
+          group: {
+            include: { schedules: true },
+          },
+        },
+        orderBy: { enrolledAt: "asc" },
+      },
+    },
   })
 }
 
@@ -20,7 +32,6 @@ export async function createStudent(data: CreateStudentInput) {
     data: {
       ...data,
       birthDate: data.birthDate ? new Date(data.birthDate) : undefined,
-      medicalClearanceExpiry: data.medicalClearanceExpiry ? new Date(data.medicalClearanceExpiry) : undefined,
     },
   })
 }
@@ -31,7 +42,6 @@ export async function updateStudent(id: string, data: UpdateStudentInput) {
     data: {
       ...data,
       birthDate: data.birthDate ? new Date(data.birthDate) : undefined,
-      medicalClearanceExpiry: data.medicalClearanceExpiry ? new Date(data.medicalClearanceExpiry) : undefined,
     },
   })
 }

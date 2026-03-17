@@ -5,13 +5,13 @@ CREATE TYPE "UserRole" AS ENUM ('OWNER', 'TRAINER', 'RECEPTIONIST');
 CREATE TYPE "GymStatus" AS ENUM ('ACTIVE', 'INACTIVE', 'SUSPENDED');
 
 -- CreateEnum
-CREATE TYPE "MedicalClearance" AS ENUM ('PENDING', 'APPROVED', 'EXPIRED');
-
--- CreateEnum
 CREATE TYPE "DayOfWeek" AS ENUM ('MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY');
 
 -- CreateEnum
 CREATE TYPE "PaymentStatus" AS ENUM ('PENDING', 'PAID', 'EXPIRED');
+
+-- CreateEnum
+CREATE TYPE "StudentFileType" AS ENUM ('FICHA', 'APTO_MEDICO');
 
 -- CreateTable
 CREATE TABLE "User" (
@@ -81,8 +81,6 @@ CREATE TABLE "Student" (
     "nationalId" TEXT,
     "emergencyPhone" TEXT,
     "emergencyContact" TEXT,
-    "medicalClearance" "MedicalClearance" NOT NULL DEFAULT 'PENDING',
-    "medicalClearanceExpiry" TIMESTAMP(3),
     "phone" TEXT,
     "joinedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "leftAt" TIMESTAMP(3),
@@ -152,6 +150,21 @@ CREATE TABLE "Schedule" (
 );
 
 -- CreateTable
+CREATE TABLE "StudentFile" (
+    "id" TEXT NOT NULL,
+    "studentId" TEXT NOT NULL,
+    "gymId" TEXT NOT NULL,
+    "fileType" "StudentFileType" NOT NULL,
+    "fileName" TEXT NOT NULL,
+    "storagePath" TEXT NOT NULL,
+    "mimeType" TEXT NOT NULL,
+    "sizeBytes" INTEGER NOT NULL,
+    "uploadedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "StudentFile_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "Payment" (
     "id" TEXT NOT NULL,
     "gymId" TEXT NOT NULL,
@@ -212,6 +225,12 @@ CREATE UNIQUE INDEX "StudentGroup_studentId_groupId_key" ON "StudentGroup"("stud
 CREATE INDEX "Schedule_groupId_idx" ON "Schedule"("groupId");
 
 -- CreateIndex
+CREATE INDEX "StudentFile_studentId_idx" ON "StudentFile"("studentId");
+
+-- CreateIndex
+CREATE INDEX "StudentFile_gymId_idx" ON "StudentFile"("gymId");
+
+-- CreateIndex
 CREATE INDEX "Payment_gymId_period_status_idx" ON "Payment"("gymId", "period", "status");
 
 -- CreateIndex
@@ -255,6 +274,12 @@ ALTER TABLE "StudentGroup" ADD CONSTRAINT "StudentGroup_groupId_fkey" FOREIGN KE
 
 -- AddForeignKey
 ALTER TABLE "Schedule" ADD CONSTRAINT "Schedule_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "Group"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StudentFile" ADD CONSTRAINT "StudentFile_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Student"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StudentFile" ADD CONSTRAINT "StudentFile_gymId_fkey" FOREIGN KEY ("gymId") REFERENCES "Gym"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Payment" ADD CONSTRAINT "Payment_gymId_fkey" FOREIGN KEY ("gymId") REFERENCES "Gym"("id") ON DELETE CASCADE ON UPDATE CASCADE;
