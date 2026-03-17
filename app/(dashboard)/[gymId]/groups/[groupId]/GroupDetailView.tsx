@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/Input"
 import { Select } from "@/components/ui/Select"
 import { Label } from "@/components/ui/Label"
 import { FormField } from "@/components/ui/FormField"
+import { FormModal } from "@/components/ui/FormModal"
 import { Tabs } from "@/components/ui/Tabs"
 import { DataTable } from "@/components/ui/DataTable"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
@@ -103,17 +104,18 @@ type SubTabProps = { group: GroupDetail; gymId: string; groupId: string; onRefre
 // ─── INFO TAB ─────────────────────────────────────────────────────────────────
 
 function InfoTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
-  const [editing, setEditing] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
   const [form, setForm] = useState({ name: group.name, monthlyPrice: String(group.monthlyPrice), maxCapacity: group.maxCapacity != null ? String(group.maxCapacity) : "" })
   const [submitting, setSubmitting] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
 
   function startEdit() {
     setForm({ name: group.name, monthlyPrice: String(group.monthlyPrice), maxCapacity: group.maxCapacity != null ? String(group.maxCapacity) : "" })
-    setEditError(null); setEditing(true)
+    setEditError(null); setShowEditModal(true)
   }
 
-  async function handleSave() {
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault()
     setEditError(null)
     if (!form.name.trim()) { setEditError("El nombre es obligatorio."); return }
     if (!form.monthlyPrice) { setEditError("El precio mensual es obligatorio."); return }
@@ -125,39 +127,19 @@ function InfoTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
     const res = await fetch(`/api/groups/${groupId}?gymId=${gymId}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     })
-    if (res.ok) { setEditing(false); await onRefresh() }
+    if (res.ok) { setShowEditModal(false); await onRefresh() }
     else { const d = await res.json().catch(() => ({})); setEditError(d?.error ?? "Error al guardar.") }
     setSubmitting(false)
   }
 
   return (
-    <div className="rounded-xl border border-[#E5E4E0] bg-white px-5 py-5 space-y-5">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-[#111110]">Información del grupo</p>
-        {!editing && <Button onClick={startEdit}>Editar</Button>}
-      </div>
-
-      {editError && <p className="text-sm text-red-600">{editError}</p>}
-
-      {editing ? (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <FormField label="Nombre" required>
-              <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ej: Nivel Inicial" />
-            </FormField>
-            <FormField label="Precio mensual" required>
-              <Input type="number" min="0" step="0.01" value={form.monthlyPrice} onChange={(e) => setForm((f) => ({ ...f, monthlyPrice: e.target.value }))} placeholder="Ej: 15000" />
-            </FormField>
-            <FormField label="Capacidad máx.">
-              <Input type="number" min="1" value={form.maxCapacity} onChange={(e) => setForm((f) => ({ ...f, maxCapacity: e.target.value }))} placeholder="Sin límite" />
-            </FormField>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button onClick={handleSave} disabled={submitting}>{submitting ? "Guardando…" : "Guardar"}</Button>
-            <Button variant="secondary" onClick={() => { setEditing(false); setEditError(null); setForm({ name: group.name, monthlyPrice: String(group.monthlyPrice), maxCapacity: group.maxCapacity != null ? String(group.maxCapacity) : "" }) }}>Cancelar</Button>
-          </div>
+    <>
+      <div className="rounded-xl border border-[#E5E4E0] bg-white px-5 py-5 space-y-5">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold text-[#111110]">Información del grupo</p>
+          <Button onClick={startEdit}>Editar</Button>
         </div>
-      ) : (
+
         <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
             <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Nombre</dt>
@@ -172,8 +154,28 @@ function InfoTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
             <dd className="mt-1 text-sm font-medium text-[#111110]">{group.maxCapacity ?? <span className="text-[#A5A49D]">Sin límite</span>}</dd>
           </div>
         </dl>
-      )}
-    </div>
+      </div>
+
+      <FormModal
+        open={showEditModal}
+        title="Editar grupo"
+        error={editError}
+        onSubmit={handleSave}
+        submitting={submitting}
+        onCancel={() => { setShowEditModal(false); setEditError(null) }}
+        gridCols="sm:grid-cols-3"
+      >
+        <FormField label="Nombre" required>
+          <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ej: Nivel Inicial" />
+        </FormField>
+        <FormField label="Precio mensual" required>
+          <Input type="number" min="0" step="0.01" value={form.monthlyPrice} onChange={(e) => setForm((f) => ({ ...f, monthlyPrice: e.target.value }))} placeholder="Ej: 15000" />
+        </FormField>
+        <FormField label="Capacidad máx.">
+          <Input type="number" min="1" value={form.maxCapacity} onChange={(e) => setForm((f) => ({ ...f, maxCapacity: e.target.value }))} placeholder="Sin límite" />
+        </FormField>
+      </FormModal>
+    </>
   )
 }
 
@@ -222,48 +224,43 @@ function SchedulesTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold text-[#111110]">Horarios</p>
-        <Button onClick={() => { setShowForm(true); setFormError(null) }}>+ Agregar horario</Button>
+        <Button onClick={() => { setShowForm(true); setFormError(null); setForm(EMPTY_SCHEDULE) }}>+ Agregar horario</Button>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleAdd} className="rounded-xl border border-[#E5E4E0] bg-white px-5 py-5 space-y-4">
-          <p className="text-sm font-semibold text-[#111110]">Nuevo horario</p>
-          {formError && <p className="text-sm text-red-600">{formError}</p>}
-
-          <div className="flex flex-col gap-1.5">
-            <Label>Días *</Label>
-            <div className="flex flex-wrap gap-2">
-              {DAYS.map((d) => {
-                const checked = form.weekDays.includes(d.value)
-                return (
-                  <button key={d.value} type="button" onClick={() => toggleDay(d.value)}
-                    className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-                      checked ? "bg-[#111110] text-white" : "border border-[#E5E4E0] text-[#68685F] hover:bg-[#F0EFEB] hover:text-[#111110]"
-                    }`}
-                  >{d.short}</button>
-                )
-              })}
-            </div>
+      <FormModal
+        open={showForm}
+        title="Nuevo horario"
+        error={formError}
+        onSubmit={handleAdd}
+        submitting={submitting}
+        onCancel={() => { setShowForm(false); setForm(EMPTY_SCHEDULE); setFormError(null) }}
+        gridCols="sm:grid-cols-3"
+      >
+        <div className="sm:col-span-3 flex flex-col gap-1.5">
+          <Label>Días *</Label>
+          <div className="flex flex-wrap gap-2">
+            {DAYS.map((d) => {
+              const checked = form.weekDays.includes(d.value)
+              return (
+                <button key={d.value} type="button" onClick={() => toggleDay(d.value)}
+                  className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                    checked ? "bg-[#111110] text-white" : "border border-[#E5E4E0] text-[#68685F] hover:bg-[#F0EFEB] hover:text-[#111110]"
+                  }`}
+                >{d.short}</button>
+              )
+            })}
           </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <FormField label="Hora inicio" required>
-              <Input type="time" value={form.startTime} onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))} />
-            </FormField>
-            <FormField label="Hora fin" required>
-              <Input type="time" value={form.endTime} onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))} />
-            </FormField>
-            <FormField label="Fecha inicio" required>
-              <Input type="date" value={form.startDate} onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))} />
-            </FormField>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <Button type="submit" disabled={submitting}>{submitting ? "Guardando…" : "Guardar"}</Button>
-            <Button type="button" variant="secondary" onClick={() => { setShowForm(false); setForm(EMPTY_SCHEDULE); setFormError(null) }}>Cancelar</Button>
-          </div>
-        </form>
-      )}
+        </div>
+        <FormField label="Hora inicio" required>
+          <Input type="time" value={form.startTime} onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))} />
+        </FormField>
+        <FormField label="Hora fin" required>
+          <Input type="time" value={form.endTime} onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))} />
+        </FormField>
+        <FormField label="Fecha inicio" required>
+          <Input type="date" value={form.startDate} onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))} />
+        </FormField>
+      </FormModal>
 
       <div className="rounded-xl border border-[#E5E4E0] bg-white overflow-hidden">
         {group.schedules.length === 0 ? (
@@ -356,7 +353,8 @@ function StudentsTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
     setShowPicker(true); setEnrollError(null); setSelectedStudentId(""); loadGymStudents()
   }
 
-  async function handleEnroll() {
+  async function handleEnroll(e: React.FormEvent) {
+    e.preventDefault()
     setEnrollError(null)
     if (!selectedStudentId) { setEnrollError("Seleccioná un alumno."); return }
     setEnrolling(true)
@@ -384,28 +382,28 @@ function StudentsTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
         <Button onClick={handleShowPicker}>+ Inscribir alumno</Button>
       </div>
 
-      {showPicker && (
-        <div className="rounded-xl border border-[#E5E4E0] bg-white px-5 py-5 space-y-4">
-          <p className="text-sm font-semibold text-[#111110]">Inscribir alumno</p>
-          {enrollError && <p className="text-sm text-red-600">{enrollError}</p>}
-          {loadingPicker ? (
-            <p className="text-sm text-[#A5A49D]">Cargando alumnos…</p>
-          ) : gymStudents.length === 0 ? (
-            <p className="text-sm text-[#68685F]">No hay alumnos disponibles para inscribir.</p>
-          ) : (
-            <FormField label="Alumno">
-              <Select value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)}>
-                <option value="">Seleccioná un alumno…</option>
-                {gymStudents.map((s) => <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>)}
-              </Select>
-            </FormField>
-          )}
-          <div className="flex items-center gap-3">
-            <Button onClick={handleEnroll} disabled={enrolling || gymStudents.length === 0}>{enrolling ? "Inscribiendo…" : "Confirmar"}</Button>
-            <Button variant="secondary" onClick={() => { setShowPicker(false); setEnrollError(null) }}>Cancelar</Button>
-          </div>
-        </div>
-      )}
+      <FormModal
+        open={showPicker}
+        title="Inscribir alumno"
+        error={enrollError}
+        onSubmit={handleEnroll}
+        submitting={enrolling}
+        onCancel={() => { setShowPicker(false); setEnrollError(null) }}
+        gridCols="sm:grid-cols-1"
+      >
+        {loadingPicker ? (
+          <p className="text-sm text-[#A5A49D]">Cargando alumnos…</p>
+        ) : gymStudents.length === 0 ? (
+          <p className="text-sm text-[#68685F]">No hay alumnos disponibles para inscribir.</p>
+        ) : (
+          <FormField label="Alumno">
+            <Select value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)}>
+              <option value="">Seleccioná un alumno…</option>
+              {gymStudents.map((s) => <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>)}
+            </Select>
+          </FormField>
+        )}
+      </FormModal>
 
       <DataTable
         columns={[
@@ -495,33 +493,33 @@ function buildEditTrainerForm(assigned: AssignedTrainer): TrainerFormState {
   return { trainerId: assigned.trainer.id, hourlyRate: assigned.hourlyRate, days }
 }
 
-// Sub-component: the assignment / edit form
+// Sub-component: the assignment / edit form (content only — no buttons, used inside FormModal)
 function TrainerAssignForm({
-  title,
   gymTrainers,
   loadingTrainers,
   group,
   initialForm,
-  submitting,
-  formError,
-  onSubmit,
-  onCancel,
   editMode,
+  onFormChange,
 }: {
-  title: string
   gymTrainers: GymTrainer[]
   loadingTrainers: boolean
   group: GroupDetail
   initialForm: TrainerFormState
-  submitting: boolean
-  formError: string | null
-  onSubmit: (form: TrainerFormState) => void
-  onCancel: () => void
   editMode: boolean
+  onFormChange: (form: TrainerFormState) => void
 }) {
   const [form, setForm] = useState<TrainerFormState>(initialForm)
 
   useEffect(() => { setForm(initialForm) }, [initialForm])
+
+  function updateForm(updater: (prev: TrainerFormState) => TrainerFormState) {
+    setForm((prev) => {
+      const next = updater(prev)
+      onFormChange(next)
+      return next
+    })
+  }
 
   // Build a lookup: which days are in the group's schedules and their times
   const groupDayMap: Partial<Record<DayOfWeek, { startTime: string; endTime: string }>> = {}
@@ -534,7 +532,7 @@ function TrainerAssignForm({
   const groupDays = DAYS.filter((d) => groupDayMap[d.value] !== undefined)
 
   function toggleDay(day: DayOfWeek) {
-    setForm((f) => {
+    updateForm((f) => {
       const current = f.days[day]
       if (current?.checked) {
         const next = { ...f.days }
@@ -553,7 +551,7 @@ function TrainerAssignForm({
   }
 
   function updateDayTime(day: DayOfWeek, field: "startTime" | "endTime", value: string) {
-    setForm((f) => ({
+    updateForm((f) => ({
       ...f,
       days: { ...f.days, [day]: { ...(f.days[day] ?? { checked: true, startTime: "", endTime: "" }), [field]: value } },
     }))
@@ -565,17 +563,11 @@ function TrainerAssignForm({
       const times = groupDayMap[d.value]!
       next[d.value] = { checked: true, startTime: times.startTime, endTime: times.endTime }
     }
-    setForm((f) => ({ ...f, days: next }))
+    updateForm((f) => ({ ...f, days: next }))
   }
 
   return (
-    <div className="rounded-xl border border-[#E5E4E0] bg-white px-5 py-5 space-y-4">
-      <p className="text-sm font-semibold text-[#111110]">{title}</p>
-
-      {formError && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{formError}</div>
-      )}
-
+    <div className="space-y-5">
       {loadingTrainers ? (
         <p className="text-sm text-[#A5A49D]">Cargando entrenadores…</p>
       ) : (
@@ -584,7 +576,7 @@ function TrainerAssignForm({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {!editMode && (
               <FormField label="Entrenador" required>
-                <Select value={form.trainerId} onChange={(e) => setForm((f) => ({ ...f, trainerId: e.target.value }))}>
+                <Select value={form.trainerId} onChange={(e) => updateForm((f) => ({ ...f, trainerId: e.target.value }))}>
                   <option value="">Seleccioná un entrenador…</option>
                   {gymTrainers.map((t) => (
                     <option key={t.id} value={t.id}>{t.name}</option>
@@ -598,7 +590,7 @@ function TrainerAssignForm({
                 min="0"
                 step="0.01"
                 value={form.hourlyRate}
-                onChange={(e) => setForm((f) => ({ ...f, hourlyRate: e.target.value }))}
+                onChange={(e) => updateForm((f) => ({ ...f, hourlyRate: e.target.value }))}
                 placeholder="Ej: 2000"
               />
             </FormField>
@@ -671,16 +663,6 @@ function TrainerAssignForm({
           )}
         </div>
       )}
-
-      <div className="flex items-center gap-3">
-        <Button
-          onClick={() => onSubmit(form)}
-          disabled={submitting || loadingTrainers}
-        >
-          {submitting ? "Guardando…" : editMode ? "Guardar cambios" : "Confirmar"}
-        </Button>
-        <Button variant="secondary" onClick={onCancel}>Cancelar</Button>
-      </div>
     </div>
   )
 }
@@ -694,10 +676,14 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
   const [showForm, setShowForm] = useState(false)
   const [confirmTrainerId, setConfirmTrainerId] = useState<string | null>(null)
 
-  // Edit state
+  // Edit modal state
   const [editingTrainer, setEditingTrainer] = useState<AssignedTrainer | null>(null)
-  const [editing, setEditing] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
+
+  // Track current form state from TrainerAssignForm children
+  const [assignFormCurrent, setAssignFormCurrent] = useState<TrainerFormState>(buildEmptyTrainerForm())
+  const [editFormCurrent, setEditFormCurrent] = useState<TrainerFormState>(buildEmptyTrainerForm())
 
   const assignedIds = new Set(group.trainers.map((t) => t.trainer.id))
 
@@ -712,18 +698,19 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
   }
 
   function handleShowAssignForm() {
-    setEditingTrainer(null)
-    setEditing(false)
+    const empty = buildEmptyTrainerForm()
+    setAssignFormCurrent(empty)
     setAssignError(null)
     setShowForm(true)
     loadGymTrainers()
   }
 
   function handleShowEditForm(trainer: AssignedTrainer) {
-    setShowForm(false)
+    const initial = buildEditTrainerForm(trainer)
     setEditingTrainer(trainer)
-    setEditing(true)
+    setEditFormCurrent(initial)
     setEditError(null)
+    setShowEditModal(true)
   }
 
   function buildSchedulesPayload(days: Partial<Record<DayOfWeek, TrainerDayEntry>>) {
@@ -750,16 +737,17 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
     return null
   }
 
-  async function handleAssign(form: TrainerFormState) {
+  async function handleAssign(e: React.FormEvent) {
+    e.preventDefault()
     setAssignError(null)
-    const err = validateForm(form, true)
+    const err = validateForm(assignFormCurrent, true)
     if (err) { setAssignError(err); return }
 
     setAssigning(true)
     const body = {
-      trainerId: form.trainerId,
-      hourlyRate: Number(form.hourlyRate),
-      schedules: buildSchedulesPayload(form.days),
+      trainerId: assignFormCurrent.trainerId,
+      hourlyRate: Number(assignFormCurrent.hourlyRate),
+      schedules: buildSchedulesPayload(assignFormCurrent.days),
     }
     const res = await fetch(`/api/groups/${groupId}/trainers?gymId=${gymId}`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -769,21 +757,22 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
     setAssigning(false)
   }
 
-  async function handleEdit(form: TrainerFormState) {
+  async function handleEdit(e: React.FormEvent) {
+    e.preventDefault()
     if (!editingTrainer) return
     setEditError(null)
-    const err = validateForm(form, false)
+    const err = validateForm(editFormCurrent, false)
     if (err) { setEditError(err); return }
 
     setAssigning(true)
     const body = {
-      hourlyRate: Number(form.hourlyRate),
-      schedules: buildSchedulesPayload(form.days),
+      hourlyRate: Number(editFormCurrent.hourlyRate),
+      schedules: buildSchedulesPayload(editFormCurrent.days),
     }
     const res = await fetch(`/api/groups/${groupId}/trainers/${editingTrainer.trainer.id}?gymId=${gymId}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     })
-    if (res.ok) { setEditing(false); setEditingTrainer(null); await onRefresh() }
+    if (res.ok) { setShowEditModal(false); setEditingTrainer(null); await onRefresh() }
     else { const d = await res.json().catch(() => ({})); setEditError(d?.error ?? "Error al actualizar el entrenador.") }
     setAssigning(false)
   }
@@ -809,42 +798,50 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
         <p className="text-sm font-semibold text-[#111110]">
           Entrenadores asignados <span className="ml-2 text-xs font-normal text-[#A5A49D]">({group.trainers.length})</span>
         </p>
-        {!showForm && !editing && (
-          <Button onClick={handleShowAssignForm}>+ Asignar entrenador</Button>
-        )}
+        <Button onClick={handleShowAssignForm}>+ Asignar entrenador</Button>
       </div>
 
-      {/* Assign form */}
-      {showForm && (
+      {/* Assign modal */}
+      <FormModal
+        open={showForm}
+        title="Asignar entrenador"
+        error={assignError}
+        onSubmit={handleAssign}
+        submitting={assigning}
+        onCancel={() => { setShowForm(false); setAssignError(null) }}
+        gridCols="sm:grid-cols-1"
+      >
         <TrainerAssignForm
-          title="Asignar entrenador"
           gymTrainers={gymTrainers}
           loadingTrainers={loadingPicker}
           group={group}
-          initialForm={buildEmptyTrainerForm()}
-          submitting={assigning}
-          formError={assignError}
-          onSubmit={handleAssign}
-          onCancel={() => { setShowForm(false); setAssignError(null) }}
+          initialForm={assignFormCurrent}
           editMode={false}
+          onFormChange={setAssignFormCurrent}
         />
-      )}
+      </FormModal>
 
-      {/* Edit form */}
-      {editing && editingTrainer && (
-        <TrainerAssignForm
-          title={`Editar: ${editingTrainer.trainer.name}`}
-          gymTrainers={[]}
-          loadingTrainers={false}
-          group={group}
-          initialForm={buildEditTrainerForm(editingTrainer)}
-          submitting={assigning}
-          formError={editError}
-          onSubmit={handleEdit}
-          onCancel={() => { setEditing(false); setEditingTrainer(null); setEditError(null) }}
-          editMode={true}
-        />
-      )}
+      {/* Edit modal */}
+      <FormModal
+        open={showEditModal}
+        title={editingTrainer ? `Editar: ${editingTrainer.trainer.name}` : "Editar asignación"}
+        error={editError}
+        onSubmit={handleEdit}
+        submitting={assigning}
+        onCancel={() => { setShowEditModal(false); setEditingTrainer(null); setEditError(null) }}
+        gridCols="sm:grid-cols-1"
+      >
+        {editingTrainer && (
+          <TrainerAssignForm
+            gymTrainers={[]}
+            loadingTrainers={false}
+            group={group}
+            initialForm={buildEditTrainerForm(editingTrainer)}
+            editMode={true}
+            onFormChange={setEditFormCurrent}
+          />
+        )}
+      </FormModal>
 
       {/* Assigned trainers table */}
       <div className="overflow-x-auto rounded-xl border border-[#E5E4E0] bg-white">

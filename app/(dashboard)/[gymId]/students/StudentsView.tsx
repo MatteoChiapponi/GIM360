@@ -4,7 +4,6 @@ import { useState } from "react"
 import { useFetch } from "@/hooks/useFetch"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
-import { Label } from "@/components/ui/Label"
 import { FormField } from "@/components/ui/FormField"
 import { StatCard } from "@/components/ui/StatCard"
 import { StatusDot } from "@/components/ui/StatusDot"
@@ -107,8 +106,8 @@ export default function StudentsView({ gymId }: { gymId: string }) {
   const [detailLoading, setDetailLoading] = useState(false)
   const [selectedDetail, setSelectedDetail] = useState<StudentDetail | null>(null)
 
-  // Edit state (inside panel)
-  const [editing, setEditing] = useState(false)
+  // Edit modal state
+  const [showEditModal, setShowEditModal] = useState(false)
   const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT)
   const [editSubmitting, setEditSubmitting] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
@@ -142,7 +141,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
 
   async function openDetail(s: Student) {
     setPanelOpen(true)
-    setEditing(false)
+    setShowEditModal(false)
     setEditError(null)
     setSelectedDetail(null)
     setFiles([])
@@ -160,7 +159,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
   function closeDetail() {
     setPanelOpen(false)
     setSelectedDetail(null)
-    setEditing(false)
+    setShowEditModal(false)
     setEditError(null)
     setFiles([])
     setFilesError(null)
@@ -220,11 +219,12 @@ export default function StudentsView({ gymId }: { gymId: string }) {
       dueDay: String(selectedDetail.dueDay),
       phone: selectedDetail.phone ?? "",
     })
-    setEditing(true)
+    setShowEditModal(true)
     setEditError(null)
   }
 
-  async function handleSaveEdit() {
+  async function handleSaveEdit(e: React.FormEvent) {
+    e.preventDefault()
     if (!selectedDetail) return
     setEditError(null)
     if (!editForm.firstName.trim()) { setEditError("El nombre es obligatorio."); return }
@@ -241,7 +241,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
       }),
     })
     if (res.ok) {
-      setEditing(false)
+      setShowEditModal(false)
       const [updated] = await Promise.all([
         fetch(`/api/students/${selectedDetail.id}?gymId=${gymId}`).then((r) => r.json()),
         refetch(),
@@ -389,41 +389,12 @@ export default function StudentsView({ gymId }: { gymId: string }) {
 
                 <div className="px-6 py-5 space-y-6">
                   {/* ── Acciones ─────────────────────────────────────────── */}
-                  {editing ? (
-                    <div className="space-y-4">
-                      <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Editar alumno</h3>
-                      {editError && <p className="text-sm text-red-600">{editError}</p>}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <Label>Nombre *</Label>
-                          <Input value={editForm.firstName} onChange={(e) => setEditForm((f) => ({ ...f, firstName: e.target.value }))} />
-                        </div>
-                        <div className="space-y-1">
-                          <Label>Apellido *</Label>
-                          <Input value={editForm.lastName} onChange={(e) => setEditForm((f) => ({ ...f, lastName: e.target.value }))} />
-                        </div>
-                        <div className="space-y-1">
-                          <Label>Día de cobro *</Label>
-                          <Input type="number" min="1" max="31" value={editForm.dueDay} onChange={(e) => setEditForm((f) => ({ ...f, dueDay: e.target.value }))} />
-                        </div>
-                        <div className="space-y-1">
-                          <Label>Teléfono</Label>
-                          <Input value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} />
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <Button onClick={handleSaveEdit} disabled={editSubmitting}>{editSubmitting ? "Guardando…" : "Guardar"}</Button>
-                        <Button variant="secondary" onClick={() => setEditing(false)}>Cancelar</Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-3">
-                      <Button variant="secondary" onClick={startEdit}>Editar</Button>
-                      {selectedDetail.leftAt === null && (
-                        <Button variant="danger" onClick={() => setConfirmId(selectedDetail.id)}>Dar de baja</Button>
-                      )}
-                    </div>
-                  )}
+                  <div className="flex items-center gap-3">
+                    <Button variant="secondary" onClick={startEdit}>Editar</Button>
+                    {selectedDetail.leftAt === null && (
+                      <Button variant="danger" onClick={() => setConfirmId(selectedDetail.id)}>Dar de baja</Button>
+                    )}
+                  </div>
 
                   {/* ── Información ──────────────────────────────────────── */}
                   <div>
@@ -607,6 +578,29 @@ export default function StudentsView({ gymId }: { gymId: string }) {
           </div>
         </div>
       )}
+
+      <FormModal
+        open={showEditModal}
+        title="Editar alumno"
+        error={editError}
+        onSubmit={handleSaveEdit}
+        submitting={editSubmitting}
+        onCancel={() => { setShowEditModal(false); setEditError(null) }}
+        gridCols="sm:grid-cols-2"
+      >
+        <FormField label="Nombre" required>
+          <Input value={editForm.firstName} onChange={(e) => setEditForm((f) => ({ ...f, firstName: e.target.value }))} placeholder="Ej: María" />
+        </FormField>
+        <FormField label="Apellido" required>
+          <Input value={editForm.lastName} onChange={(e) => setEditForm((f) => ({ ...f, lastName: e.target.value }))} placeholder="Ej: García" />
+        </FormField>
+        <FormField label="Día de cobro" required>
+          <Input type="number" min="1" max="31" value={editForm.dueDay} onChange={(e) => setEditForm((f) => ({ ...f, dueDay: e.target.value }))} placeholder="Ej: 10" />
+        </FormField>
+        <FormField label="Teléfono">
+          <Input value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Ej: 11 1234-5678" />
+        </FormField>
+      </FormModal>
 
       <ConfirmDialog
         open={confirmId !== null}

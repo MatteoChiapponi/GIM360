@@ -17,7 +17,7 @@ type GroupMetrics = {
   groupId: string; groupName: string; monthlyPrice: number
   activeStudents: number; maxCapacity: number | null; occupancyRate: number | null
   projectedRevenue: number; collectedRevenue: number
-  monthlyHours: number; trainerCost: number; margin: number
+  monthlyHours: number; trainerCost: number; margin: number; breakevenStudents: number | null
 }
 
 type MetricView = "gimnasio" | "grupos"
@@ -105,6 +105,9 @@ export default function MetricsView({ gymId }: { gymId: string }) {
 
   const ebitdaHighlight = gymMetrics === null ? "neutral" : gymMetrics.ebitda >= 0 ? "positive" : "negative"
   const totalRevenue = gymMetrics ? gymMetrics.totalCollectedRevenue + gymMetrics.totalPendingRevenue : 0
+  const ebitdaMarginPct = gymMetrics && gymMetrics.totalCollectedRevenue > 0
+    ? Math.round((gymMetrics.ebitda / gymMetrics.totalCollectedRevenue) * 100)
+    : null
   const totalGroupMargin = groupMetrics.reduce((s, g) => s + g.margin, 0)
 
   return (
@@ -167,13 +170,31 @@ export default function MetricsView({ gymId }: { gymId: string }) {
                     <thead>
                       <tr className="border-b border-[#F0EFEB]">
                         {[
-                          { label: "Grupo", align: "left" }, { label: "Alumnos", align: "right" },
-                          { label: "Ocupación", align: "right" }, { label: "Precio/mes", align: "right" },
-                          { label: "Ing. proyectado", align: "right" }, { label: "Ing. cobrado", align: "right" },
-                          { label: "Hs/mes", align: "right" }, { label: "Costo prof.", align: "right" },
-                          { label: "Margen", align: "right" },
-                        ].map(({ label, align }) => (
-                          <th key={label} className={`px-4 py-3.5 text-${align} text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]`}>{label}</th>
+                          { label: "Grupo", align: "left", tooltip: null },
+                          { label: "Alumnos", align: "right", tooltip: "Alumnos activos en el grupo. Si hay capacidad máxima configurada, se muestra el total." },
+                          { label: "Ocupación", align: "right", tooltip: "Porcentaje de ocupación respecto a la capacidad máxima del grupo." },
+                          { label: "Precio/mes", align: "right", tooltip: "Precio mensual que paga cada alumno inscripto en este grupo." },
+                          { label: "Ing. proyectado", align: "right", tooltip: "Ingreso esperado si todos los alumnos activos pagaran: alumnos × precio/mes." },
+                          { label: "Ing. cobrado", align: "right", tooltip: "Suma real de pagos PAGADOS en el período para este grupo." },
+                          { label: "Hs/mes", align: "right", tooltip: "Horas de clase estimadas por mes, basadas en los horarios del grupo (× 4,33 semanas)." },
+                          { label: "Costo prof.", align: "right", tooltip: "Costo total de los profesores: tarifa/hora × horas semanales × 4,33 semanas/mes." },
+                          { label: "Punto equilibrio", align: "right", tooltip: "Mínimo de alumnos que deben pagar para cubrir el costo de los profesores. Verde si el ingreso cobrado lo supera." },
+                          { label: "Margen", align: "right", tooltip: "Ingreso cobrado menos costo de profesores. No incluye gastos fijos." },
+                        ].map(({ label, align, tooltip }) => (
+                          <th key={label} className={`px-4 py-3.5 text-${align} text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]`}>
+                            {tooltip ? (
+                              <span className="relative group/th inline-flex items-center gap-1 cursor-default">
+                                {label}
+                                <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" className="opacity-40 group-hover/th:opacity-80 transition-opacity shrink-0">
+                                  <circle cx="6" cy="6" r="5.5" stroke="currentColor" strokeWidth="1" fill="none"/>
+                                  <text x="6" y="9" textAnchor="middle" fontSize="8" fontWeight="600">?</text>
+                                </svg>
+                                <span className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 w-56 rounded-lg bg-[#111110] px-3 py-2 text-[11px] font-normal normal-case tracking-normal text-white shadow-lg opacity-0 group-hover/th:opacity-100 transition-opacity z-50 text-left leading-relaxed">
+                                  {tooltip}
+                                </span>
+                              </span>
+                            ) : label}
+                          </th>
                         ))}
                       </tr>
                     </thead>
@@ -194,6 +215,15 @@ export default function MetricsView({ gymId }: { gymId: string }) {
                           <td className="px-4 py-4 text-right font-mono font-semibold text-[#111110]">{fmt(g.collectedRevenue)}</td>
                           <td className="px-4 py-4 text-right text-[#A5A49D]">{g.monthlyHours.toFixed(1)}h</td>
                           <td className="px-4 py-4 text-right font-mono text-red-700">{fmt(g.trainerCost)}</td>
+                          <td className="px-4 py-4 text-right">
+                            {g.breakevenStudents === null ? (
+                              <span className="text-[#A5A49D]">—</span>
+                            ) : (
+                              <span className={`font-mono font-medium ${g.margin >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                                {g.breakevenStudents} alumnos
+                              </span>
+                            )}
+                          </td>
                           <td className={`px-4 py-4 text-right font-mono font-semibold ${g.margin >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmt(g.margin)}</td>
                         </tr>
                       ))}
@@ -205,6 +235,7 @@ export default function MetricsView({ gymId }: { gymId: string }) {
                         <td className="px-4 py-3.5 text-right font-mono font-semibold text-[#111110]">{fmt(groupMetrics.reduce((s, g) => s + g.collectedRevenue, 0))}</td>
                         <td className="px-4 py-3.5 text-right text-[#A5A49D]">—</td>
                         <td className="px-4 py-3.5 text-right font-mono font-semibold text-red-700">{fmt(groupMetrics.reduce((s, g) => s + g.trainerCost, 0))}</td>
+                        <td className="px-4 py-3.5 text-right text-[#A5A49D]">—</td>
                         <td className={`px-4 py-3.5 text-right font-mono font-bold ${totalGroupMargin >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmt(totalGroupMargin)}</td>
                       </tr>
                     </tfoot>

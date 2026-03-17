@@ -58,6 +58,8 @@ export type GroupMetrics = {
   trainerCost: number
   /** collectedRevenue - trainerCost */
   margin: number
+  /** Minimum students needed to cover trainerCost. null if monthlyPrice is 0. */
+  breakevenStudents: number | null
 }
 
 /**
@@ -156,6 +158,7 @@ export async function getGroupMetrics(input: MetricsQueryInput): Promise<GroupMe
       monthlyHours,
       trainerCost,
       margin: collectedRevenue - trainerCost,
+      breakevenStudents: monthlyPrice > 0 ? Math.ceil(trainerCost / monthlyPrice) : null,
     }
   })
 }

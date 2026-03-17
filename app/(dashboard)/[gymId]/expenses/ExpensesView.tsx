@@ -5,7 +5,6 @@ import { useFetch } from "@/hooks/useFetch"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
 import { FormField } from "@/components/ui/FormField"
-import { Label } from "@/components/ui/Label"
 import { StatCard } from "@/components/ui/StatCard"
 import { PageHeader } from "@/components/ui/PageHeader"
 import { SearchToolbar } from "@/components/ui/SearchToolbar"
@@ -68,12 +67,14 @@ export default function ExpensesView({ gymId }: { gymId: string }) {
     setEditingId(exp.id); setEditForm({ name: exp.name, amount: String(exp.amount) }); setEditError(null)
   }
 
-  async function handleSaveEdit(id: string) {
+  async function handleSaveEdit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editingId) return
     setEditError(null)
     if (!editForm.name.trim()) { setEditError("El nombre es obligatorio."); return }
     if (!editForm.amount) { setEditError("El monto es obligatorio."); return }
     setEditSubmitting(true)
-    const res = await fetch(`/api/expenses/${id}?gymId=${gymId}`, {
+    const res = await fetch(`/api/expenses/${editingId}?gymId=${gymId}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: editForm.name.trim(), amount: Number(editForm.amount) }),
     })
@@ -127,6 +128,22 @@ export default function ExpensesView({ gymId }: { gymId: string }) {
         </FormField>
       </FormModal>
 
+      <FormModal
+        open={editingId !== null}
+        title="Editar gasto fijo"
+        error={editError}
+        onSubmit={handleSaveEdit}
+        submitting={editSubmitting}
+        onCancel={() => { setEditingId(null); setEditForm(EMPTY_FORM); setEditError(null) }}
+      >
+        <FormField label="Nombre" required>
+          <Input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ej: Alquiler" />
+        </FormField>
+        <FormField label="Monto mensual" required>
+          <Input type="number" min="0" step="0.01" value={editForm.amount} onChange={(e) => setEditForm((f) => ({ ...f, amount: e.target.value }))} placeholder="Ej: 50000" />
+        </FormField>
+      </FormModal>
+
       <DataTable
         columns={[
           { key: "name", header: "Nombre", render: (exp) => <span className="font-medium text-[#111110]">{exp.name}</span> },
@@ -147,34 +164,6 @@ export default function ExpensesView({ gymId }: { gymId: string }) {
         emptyHint={!search ? "Agregá el primer gasto con el botón de arriba." : undefined}
         minWidth="400px"
         rowKey={(exp) => exp.id}
-        renderRow={(exp, i, defaultRow) => {
-          if (editingId !== exp.id) return defaultRow
-          return (
-            <tr key={exp.id} className={`hover:bg-[#FAFAF9] transition-colors ${i > 0 ? "border-t border-[#F7F6F3]" : ""}`}>
-              <td className="px-5 py-3" colSpan={3}>
-                <div className="space-y-3">
-                  {editError && <p className="text-sm text-red-600">{editError}</p>}
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div className="flex flex-col gap-1">
-                      <Label>Nombre *</Label>
-                      <Input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <Label>Monto mensual *</Label>
-                      <Input type="number" min="0" step="0.01" value={editForm.amount} onChange={(e) => setEditForm((f) => ({ ...f, amount: e.target.value }))} />
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Button onClick={() => handleSaveEdit(exp.id)} disabled={editSubmitting}>
-                      {editSubmitting ? "Guardando…" : "Guardar"}
-                    </Button>
-                    <Button variant="secondary" onClick={() => { setEditingId(null); setEditError(null) }}>Cancelar</Button>
-                  </div>
-                </div>
-              </td>
-            </tr>
-          )
-        }}
       />
 
       <ConfirmDialog

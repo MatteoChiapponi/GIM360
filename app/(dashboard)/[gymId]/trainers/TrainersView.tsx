@@ -1,11 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
 import { useFetch } from "@/hooks/useFetch"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
-import { Label } from "@/components/ui/Label"
 import { FormField } from "@/components/ui/FormField"
 import { PageHeader } from "@/components/ui/PageHeader"
 import { SearchToolbar } from "@/components/ui/SearchToolbar"
@@ -74,8 +72,8 @@ export default function TrainersView({ gymId }: { gymId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selectedTrainer = trainers.find((t) => t.id === selectedId) ?? null
 
-  // Edit state (inside detail)
-  const [editing, setEditing] = useState(false)
+  // Edit modal state
+  const [showEditModal, setShowEditModal] = useState(false)
   const [editForm, setEditForm] = useState<{ name: string }>({ name: "" })
   const [editSubmitting, setEditSubmitting] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
@@ -115,24 +113,25 @@ export default function TrainersView({ gymId }: { gymId: string }) {
 
   function openDetail(t: Trainer) {
     setSelectedId(t.id)
-    setEditing(false)
+    setShowEditModal(false)
     setEditError(null)
   }
 
   function closeDetail() {
     setSelectedId(null)
-    setEditing(false)
+    setShowEditModal(false)
     setEditError(null)
   }
 
   function startEdit() {
     if (!selectedTrainer) return
     setEditForm({ name: selectedTrainer.name })
-    setEditing(true)
+    setShowEditModal(true)
     setEditError(null)
   }
 
-  async function handleSaveEdit() {
+  async function handleSaveEdit(e: React.FormEvent) {
+    e.preventDefault()
     if (!selectedTrainer) return
     setEditError(null)
     if (!editForm.name.trim()) { setEditError("El nombre es obligatorio."); return }
@@ -141,7 +140,7 @@ export default function TrainersView({ gymId }: { gymId: string }) {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: editForm.name.trim() }),
     })
-    if (res.ok) { setEditing(false); await refetch() }
+    if (res.ok) { setShowEditModal(false); await refetch() }
     else { const d = await res.json().catch(() => ({})); setEditError(d?.error ?? "Error al actualizar.") }
     setEditSubmitting(false)
   }
@@ -261,30 +260,13 @@ export default function TrainersView({ gymId }: { gymId: string }) {
             </div>
 
             <div className="px-6 py-5 space-y-6">
-              {/* ── Edit section ─────────────────────────────────────────── */}
-              {editing ? (
-                <div className="space-y-4">
-                  <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Editar entrenador</h3>
-                  {editError && <p className="text-sm text-red-600">{editError}</p>}
-                  <div className="space-y-1">
-                    <Label>Nombre *</Label>
-                    <Input value={editForm.name} onChange={(e) => setEditForm({ name: e.target.value })} />
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Button onClick={handleSaveEdit} disabled={editSubmitting}>
-                      {editSubmitting ? "Guardando…" : "Guardar"}
-                    </Button>
-                    <Button variant="secondary" onClick={() => setEditing(false)}>Cancelar</Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <Button variant="secondary" onClick={startEdit}>Editar nombre</Button>
-                  {selectedTrainer.active && (
-                    <Button variant="danger" onClick={() => setConfirmId(selectedTrainer.id)}>Desactivar</Button>
-                  )}
-                </div>
-              )}
+              {/* ── Actions ──────────────────────────────────────────────── */}
+              <div className="flex items-center gap-3">
+                <Button variant="secondary" onClick={startEdit}>Editar nombre</Button>
+                {selectedTrainer.active && (
+                  <Button variant="danger" onClick={() => setConfirmId(selectedTrainer.id)}>Desactivar</Button>
+                )}
+              </div>
 
               {/* ── Summary ──────────────────────────────────────────────── */}
               <div>
@@ -355,6 +337,20 @@ export default function TrainersView({ gymId }: { gymId: string }) {
           </div>
         </div>
       )}
+
+      <FormModal
+        open={showEditModal}
+        title="Editar entrenador"
+        error={editError}
+        onSubmit={handleSaveEdit}
+        submitting={editSubmitting}
+        onCancel={() => { setShowEditModal(false); setEditError(null) }}
+        gridCols="sm:grid-cols-1"
+      >
+        <FormField label="Nombre" required>
+          <Input value={editForm.name} onChange={(e) => setEditForm({ name: e.target.value })} placeholder="Ej: Carlos López" />
+        </FormField>
+      </FormModal>
 
       <ConfirmDialog
         open={confirmId !== null}

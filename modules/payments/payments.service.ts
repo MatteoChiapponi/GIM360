@@ -52,29 +52,38 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
   return getPaymentsByGym(gymId, period)
 }
 
-/** Expires any PENDING payments whose due date has already passed */
+/** Recalculates PENDING/EXPIRED status for all non-PAID payments in a period.
+ *  PENDING → EXPIRED if due date passed. EXPIRED → PENDING if due date hasn't passed yet. */
 export async function expireOverduePayments(gymId: string, period: string) {
   const periodDate = parsePeriod(period)
   const [year, month] = period.split("-").map(Number)
   const now = new Date()
+  const lastDay = new Date(year, month, 0).getDate()
 
-  const pending = await db.payment.findMany({
-    where: { gymId, period: periodDate, status: "PENDING" },
+  const payments = await db.payment.findMany({
+    where: { gymId, period: periodDate, status: { in: ["PENDING", "EXPIRED"] } },
     include: { student: { select: { dueDay: true } } },
   })
 
-  const toExpire = pending.filter((p) => {
-    const lastDay = new Date(year, month, 0).getDate()
-    const due = new Date(year, month - 1, Math.min(p.student.dueDay, lastDay))
-    return due < now
-  })
+  const toExpire: string[] = []
+  const toRevert: string[] = []
 
-  if (toExpire.length > 0) {
-    await db.payment.updateMany({
-      where: { id: { in: toExpire.map((p) => p.id) } },
-      data: { status: "EXPIRED" },
-    })
+  for (const p of payments) {
+    const due = new Date(year, month - 1, Math.min(p.student.dueDay, lastDay))
+    if (p.status === "PENDING" && due < now) toExpire.push(p.id)
+    else if (p.status === "EXPIRED" && due >= now) toRevert.push(p.id)
   }
+
+  await Promise.all([
+    toExpire.length > 0 && db.payment.updateMany({
+      where: { id: { in: toExpire } },
+      data: { status: "EXPIRED" },
+    }),
+    toRevert.length > 0 && db.payment.updateMany({
+      where: { id: { in: toRevert } },
+      data: { status: "PENDING" },
+    }),
+  ])
 }
 
 /** Returns all payments for a gym in a given period, with student info.
