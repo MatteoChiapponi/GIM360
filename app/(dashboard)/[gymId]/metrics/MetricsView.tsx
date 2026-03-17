@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react"
+import { createPortal } from "react-dom"
 import { Input } from "@/components/ui/Input"
 import { Label } from "@/components/ui/Label"
-import { StatCard } from "@/components/ui/StatCard"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,18 +33,82 @@ function fmt(n: number) {
 
 function pct(n: number) { return `${Math.round(n * 100)}%` }
 
-function MetricStatCard({ label, value, sub, highlight }: {
-  label: string; value: string; sub?: string; highlight?: "positive" | "negative" | "neutral"
+// ─── Tooltip (hover on desktop, tap on mobile) ──────────────────────────────
+
+function InfoTooltip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const [hover, setHover] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const tooltipRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+
+  const visible = open || hover
+
+  // Position the portal tooltip below the trigger
+  useLayoutEffect(() => {
+    if (!visible || !triggerRef.current) { setPos(null); return }
+    const rect = triggerRef.current.getBoundingClientRect()
+    setPos({ top: rect.bottom + 8, left: rect.left + rect.width / 2 })
+  }, [visible])
+
+  // Close on outside click (mobile)
+  useEffect(() => {
+    if (!open) return
+    function handleOutside(e: PointerEvent) {
+      if (triggerRef.current?.contains(e.target as Node)) return
+      if (tooltipRef.current?.contains(e.target as Node)) return
+      setOpen(false)
+    }
+    document.addEventListener("pointerdown", handleOutside)
+    return () => document.removeEventListener("pointerdown", handleOutside)
+  }, [open])
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="inline-flex items-center justify-center cursor-default touch-manipulation"
+        onClick={() => setOpen(o => !o)}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        aria-label="Más información"
+      >
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" className={`transition-opacity shrink-0 ${visible ? "opacity-80" : "opacity-40"}`}>
+          <circle cx="6" cy="6" r="5.5" stroke="currentColor" strokeWidth="1" fill="none"/>
+          <text x="6" y="9" textAnchor="middle" fontSize="8" fontWeight="600">?</text>
+        </svg>
+      </button>
+      {visible && pos && createPortal(
+        <div
+          ref={tooltipRef}
+          style={{ position: "fixed", top: pos.top, left: pos.left, transform: "translateX(-50%)" }}
+          className="w-56 rounded-lg bg-[#111110] px-3 py-2 text-[11px] font-normal normal-case tracking-normal text-white shadow-lg z-[9999] text-left leading-relaxed"
+        >
+          {text}
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
+
+// ─── Metric Card ─────────────────────────────────────────────────────────────
+
+function MetricStatCard({ label, value, tooltip, highlight }: {
+  label: string; value: string; tooltip?: string; highlight?: "positive" | "negative" | "neutral"
 }) {
   const accentColor = highlight === "positive" ? "#10b981" : highlight === "negative" ? "#ef4444" : "#E5E4E0"
   const valueColor = highlight === "positive" ? "text-emerald-700" : highlight === "negative" ? "text-red-700" : "text-[#111110]"
 
   return (
-    <div className="relative rounded-xl border border-[#E5E4E0] bg-white px-5 py-4 overflow-hidden">
+    <div className="relative rounded-xl border border-[#E5E4E0] bg-white px-5 py-4 overflow-hidden flex flex-col">
       <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl" style={{ backgroundColor: accentColor }} />
-      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">{label}</p>
-      <p className={`mt-2 text-2xl font-bold font-mono ${valueColor}`}>{value}</p>
-      {sub && <p className="mt-1 text-[11px] text-[#C8C7C3]">{sub}</p>}
+      <p className="min-h-[2rem] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D] flex items-start gap-1">
+        {label}
+        {tooltip && <InfoTooltip text={tooltip} />}
+      </p>
+      <p className={`mt-auto text-2xl font-bold font-mono ${valueColor}`}>{value}</p>
     </div>
   )
 }
@@ -148,12 +212,13 @@ export default function MetricsView({ gymId }: { gymId: string }) {
           {/* ── GIMNASIO ── */}
           {activeView === "gimnasio" && (
             <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-                <MetricStatCard label="Ingresos cobrados" value={fmt(gymMetrics.totalCollectedRevenue)} sub="pagos PAID" highlight="positive" />
-                <MetricStatCard label="Ingresos pendientes" value={fmt(gymMetrics.totalPendingRevenue)} sub="pagos PENDING" />
-                <MetricStatCard label="Costo entrenadores" value={fmt(gymMetrics.totalTrainerCost)} sub="tarifa × horas estimadas" highlight="negative" />
-                <MetricStatCard label="Gastos fijos" value={fmt(gymMetrics.totalFixedExpenses)} sub="alquiler, servicios, etc." highlight="negative" />
-                <MetricStatCard label="EBITDA" value={fmt(gymMetrics.ebitda)} sub="cobrado − costos" highlight={ebitdaHighlight} />
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                <MetricStatCard label="Ingresos cobrados" value={fmt(gymMetrics.totalCollectedRevenue)} tooltip="Suma de todos los pagos en estado PAGADO para el período seleccionado." highlight="positive" />
+                <MetricStatCard label="Ingresos pendientes" value={fmt(gymMetrics.totalPendingRevenue)} tooltip="Suma de todos los pagos en estado PENDIENTE para el período seleccionado." />
+                <MetricStatCard label="Costo entrenadores" value={fmt(gymMetrics.totalTrainerCost)} tooltip="Costo total de entrenadores: tarifa por hora × horas semanales × 4,33 semanas/mes, para cada entrenador activo." highlight="negative" />
+                <MetricStatCard label="Gastos fijos" value={fmt(gymMetrics.totalFixedExpenses)} tooltip="Suma de todos los gastos fijos configurados: alquiler, servicios, seguros, etc." highlight="negative" />
+                <MetricStatCard label="EBITDA" value={fmt(gymMetrics.ebitda)} tooltip="Resultado operativo: ingresos cobrados menos costo de entrenadores y gastos fijos." highlight={ebitdaHighlight} />
+                <MetricStatCard label="Margen EBITDA" value={ebitdaMarginPct !== null ? `${ebitdaMarginPct}%` : "—"} tooltip="Porcentaje de ganancia (o pérdida) sobre los ingresos cobrados. Indica qué proporción del ingreso queda como resultado operativo." highlight={ebitdaHighlight} />
               </div>
               {totalRevenue > 0 && <CollectionProgress collected={gymMetrics.totalCollectedRevenue} total={totalRevenue} />}
             </div>
@@ -183,15 +248,9 @@ export default function MetricsView({ gymId }: { gymId: string }) {
                         ].map(({ label, align, tooltip }) => (
                           <th key={label} className={`px-4 py-3.5 text-${align} text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]`}>
                             {tooltip ? (
-                              <span className="relative group/th inline-flex items-center gap-1 cursor-default">
+                              <span className="inline-flex items-center gap-1 cursor-default">
                                 {label}
-                                <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" className="opacity-40 group-hover/th:opacity-80 transition-opacity shrink-0">
-                                  <circle cx="6" cy="6" r="5.5" stroke="currentColor" strokeWidth="1" fill="none"/>
-                                  <text x="6" y="9" textAnchor="middle" fontSize="8" fontWeight="600">?</text>
-                                </svg>
-                                <span className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 w-56 rounded-lg bg-[#111110] px-3 py-2 text-[11px] font-normal normal-case tracking-normal text-white shadow-lg opacity-0 group-hover/th:opacity-100 transition-opacity z-50 text-left leading-relaxed">
-                                  {tooltip}
-                                </span>
+                                <InfoTooltip text={tooltip} />
                               </span>
                             ) : label}
                           </th>

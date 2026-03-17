@@ -1,10 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useFetch } from "@/hooks/useFetch"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
+import { Label } from "@/components/ui/Label"
 import { FormField } from "@/components/ui/FormField"
+import { Select } from "@/components/ui/Select"
 import { PageHeader } from "@/components/ui/PageHeader"
 import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
@@ -12,6 +14,8 @@ import { FormModal } from "@/components/ui/FormModal"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
+
+type DayOfWeek = "MONDAY" | "TUESDAY" | "WEDNESDAY" | "THURSDAY" | "FRIDAY" | "SATURDAY" | "SUNDAY"
 
 type TrainerScheduleEntry = { weekDay: string; startTime: string; endTime: string }
 
@@ -29,7 +33,20 @@ type Trainer = {
   groups: TrainerGroupAssignment[]
 }
 
+type GroupSchedule = { weekDays: DayOfWeek[]; startTime: string; endTime: string }
+type GymGroup = { id: string; name: string; schedules: GroupSchedule[] }
+
+type DayEntry = { checked: boolean; startTime: string; endTime: string }
+type GroupAssignForm = { groupId: string; hourlyRate: string; days: Partial<Record<DayOfWeek, DayEntry>> }
+
+const EMPTY_ASSIGN: GroupAssignForm = { groupId: "", hourlyRate: "", days: {} }
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+const DAYS: { value: DayOfWeek; short: string }[] = [
+  { value: "MONDAY", short: "Lun" }, { value: "TUESDAY", short: "Mar" }, { value: "WEDNESDAY", short: "Mié" },
+  { value: "THURSDAY", short: "Jue" }, { value: "FRIDAY", short: "Vie" }, { value: "SATURDAY", short: "Sáb" }, { value: "SUNDAY", short: "Dom" },
+]
 
 const DAY_SHORT: Record<string, string> = {
   MONDAY: "Lun", TUESDAY: "Mar", WEDNESDAY: "Mié",
@@ -65,8 +82,18 @@ export default function TrainersView({ gymId }: { gymId: string }) {
   const [showInactive, setShowInactive] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<{ name: string }>({ name: "" })
+  const [assignForm, setAssignForm] = useState<GroupAssignForm>(EMPTY_ASSIGN)
+  const [showGroupSection, setShowGroupSection] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [gymGroups, setGymGroups] = useState<GymGroup[]>([])
+
+  useEffect(() => {
+    if (!showForm) return
+    fetch(`/api/groups?gymId=${gymId}`).then((r) => r.ok ? r.json() : []).then((groups) =>
+      setGymGroups(groups.map((g: GymGroup) => ({ id: g.id, name: g.name, schedules: g.schedules })))
+    )
+  }, [showForm, gymId])
 
   // Detail panel
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -97,17 +124,92 @@ export default function TrainersView({ gymId }: { gymId: string }) {
       return sortDir === "asc" ? cmp : -cmp
     })
 
+  const selectedGroup = gymGroups.find((g) => g.id === assignForm.groupId) ?? null
+
+  // Build day map for the selected group's schedules
+  const groupDayMap: Partial<Record<DayOfWeek, { startTime: string; endTime: string }>> = {}
+  if (selectedGroup) {
+    for (const s of selectedGroup.schedules) {
+      for (const d of s.weekDays) {
+        groupDayMap[d] = { startTime: s.startTime, endTime: s.endTime }
+      }
+    }
+  }
+  const groupDays = DAYS.filter((d) => groupDayMap[d.value] !== undefined)
+
+  function toggleDay(day: DayOfWeek) {
+    setAssignForm((f) => {
+      const current = f.days[day]
+      if (current?.checked) {
+        const next = { ...f.days }
+        delete next[day]
+        return { ...f, days: next }
+      }
+      const times = groupDayMap[day]
+      return { ...f, days: { ...f.days, [day]: { checked: true, startTime: times?.startTime ?? "", endTime: times?.endTime ?? "" } } }
+    })
+  }
+
+  function coverAllDays() {
+    const next: Partial<Record<DayOfWeek, DayEntry>> = {}
+    for (const d of groupDays) {
+      const times = groupDayMap[d.value]!
+      next[d.value] = { checked: true, startTime: times.startTime, endTime: times.endTime }
+    }
+    setAssignForm((f) => ({ ...f, days: next }))
+  }
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     setFormError(null)
     if (!form.name.trim()) { setFormError("El nombre es obligatorio."); return }
+
+    // Validate group assignment if section is open and group selected
+    if (showGroupSection && assignForm.groupId) {
+      if (!assignForm.hourlyRate || Number(assignForm.hourlyRate) <= 0) {
+        setFormError("La tarifa por hora es obligatoria para asignar a un grupo."); return
+      }
+      const checkedDays = Object.entries(assignForm.days).filter(([, e]) => e.checked)
+      if (checkedDays.length === 0) {
+        setFormError("Seleccioná al menos un día de horario."); return
+      }
+    }
+
     setSubmitting(true)
     const res = await fetch("/api/trainers", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ gymId, name: form.name.trim() }),
     })
-    if (res.ok) { setForm({ name: "" }); setShowForm(false); await refetch() }
-    else { const d = await res.json().catch(() => ({})); setFormError(d?.error ?? "Error al crear el entrenador.") }
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}))
+      setFormError(d?.error ?? "Error al crear el entrenador.")
+      setSubmitting(false)
+      return
+    }
+
+    const created = await res.json()
+
+    // Optional: assign to group
+    if (showGroupSection && assignForm.groupId && assignForm.hourlyRate) {
+      const schedules = Object.entries(assignForm.days)
+        .filter(([, e]) => e.checked)
+        .map(([day, e]) => ({ weekDay: day, startTime: e.startTime, endTime: e.endTime }))
+
+      if (schedules.length > 0) {
+        const assignRes = await fetch(`/api/groups/${assignForm.groupId}/trainers?gymId=${gymId}`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trainerId: created.id, hourlyRate: Number(assignForm.hourlyRate), schedules }),
+        })
+        if (!assignRes.ok) {
+          setFormError("Entrenador creado, pero no se pudo asignar al grupo.")
+          setSubmitting(false)
+          await refetch()
+          return
+        }
+      }
+    }
+
+    setForm({ name: "" }); setAssignForm(EMPTY_ASSIGN); setShowGroupSection(false); setShowForm(false); await refetch()
     setSubmitting(false)
   }
 
@@ -191,11 +293,90 @@ export default function TrainersView({ gymId }: { gymId: string }) {
         error={formError}
         onSubmit={handleCreate}
         submitting={submitting}
-        onCancel={() => { setShowForm(false); setForm({ name: "" }); setFormError(null) }}
+        onCancel={() => { setShowForm(false); setForm({ name: "" }); setAssignForm(EMPTY_ASSIGN); setShowGroupSection(false); setFormError(null) }}
+        gridCols="sm:grid-cols-1"
       >
         <FormField label="Nombre" required>
           <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ej: Carlos López" />
         </FormField>
+
+        {/* ── Optional group assignment ── */}
+        <div className="border-t border-[#F0EFEB] pt-3">
+          <button
+            type="button"
+            onClick={() => { setShowGroupSection((v) => !v); if (showGroupSection) setAssignForm(EMPTY_ASSIGN) }}
+            className="cursor-pointer text-xs font-medium text-[#68685F] hover:text-[#111110] transition-colors"
+          >
+            {showGroupSection ? "− Cancelar asignación a grupo" : "+ Asignar a un grupo (opcional)"}
+          </button>
+
+          {showGroupSection && (
+            <div className="mt-3 space-y-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <FormField label="Grupo" required>
+                  <Select
+                    value={assignForm.groupId}
+                    onChange={(e) => setAssignForm((f) => ({ ...f, groupId: e.target.value, days: {} }))}
+                  >
+                    <option value="">Seleccioná un grupo…</option>
+                    {gymGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </Select>
+                </FormField>
+                <FormField label="Tarifa por hora" required>
+                  <Input
+                    type="number" min="0" step="0.01"
+                    value={assignForm.hourlyRate}
+                    onChange={(e) => setAssignForm((f) => ({ ...f, hourlyRate: e.target.value }))}
+                    placeholder="Ej: 2000"
+                  />
+                </FormField>
+              </div>
+
+              {assignForm.groupId && (
+                groupDays.length === 0 ? (
+                  <p className="text-sm text-[#68685F]">Este grupo no tiene horarios configurados.</p>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <Label>Horarios *</Label>
+                      <button
+                        type="button" onClick={coverAllDays}
+                        className="cursor-pointer self-start rounded-md border border-[#E5E4E0] px-3 py-1.5 text-xs font-medium text-[#68685F] hover:bg-[#F0EFEB] hover:text-[#111110] transition-colors sm:self-auto"
+                      >
+                        Cubrir todo el grupo
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {groupDays.map((d) => {
+                        const entry = assignForm.days[d.value]
+                        const checked = entry?.checked ?? false
+                        const groupTimes = groupDayMap[d.value]!
+                        return (
+                          <div key={d.value} className="rounded-lg border border-[#E5E4E0] px-4 py-3">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                              <label className="flex min-w-[90px] cursor-pointer items-center gap-2.5">
+                                <input type="checkbox" checked={checked} onChange={() => toggleDay(d.value)} className="h-4 w-4 rounded border-[#E5E4E0] accent-[#111110]" />
+                                <span className={`text-sm font-semibold ${checked ? "text-[#111110]" : "text-[#A5A49D]"}`}>{d.short}</span>
+                                <span className="text-xs text-[#A5A49D]">({groupTimes.startTime}–{groupTimes.endTime})</span>
+                              </label>
+                              {checked && (
+                                <div className="flex items-center gap-2">
+                                  <Input type="time" value={entry?.startTime ?? ""} onChange={(e) => setAssignForm((f) => ({ ...f, days: { ...f.days, [d.value]: { ...(f.days[d.value] ?? { checked: true, startTime: "", endTime: "" }), startTime: e.target.value } } }))} className="w-[120px]" />
+                                  <span className="text-xs text-[#A5A49D]">a</span>
+                                  <Input type="time" value={entry?.endTime ?? ""} onChange={(e) => setAssignForm((f) => ({ ...f, days: { ...f.days, [d.value]: { ...(f.days[d.value] ?? { checked: true, startTime: "", endTime: "" }), endTime: e.target.value } } }))} className="w-[120px]" />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
+          )}
+        </div>
       </FormModal>
 
       <SearchToolbar

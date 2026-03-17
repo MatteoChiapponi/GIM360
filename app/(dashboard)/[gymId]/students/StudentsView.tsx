@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useFetch } from "@/hooks/useFetch"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
 import { FormField } from "@/components/ui/FormField"
+import { Select } from "@/components/ui/Select"
 import { StatCard } from "@/components/ui/StatCard"
 import { StatusDot } from "@/components/ui/StatusDot"
 import { Tabs } from "@/components/ui/Tabs"
@@ -77,11 +78,13 @@ function fmtCurrency(value: string | number) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
+type SimpleGroup = { id: string; name: string }
+
 type FilterTab = "ACTIVOS" | "TODOS"
-type NewForm = { firstName: string; lastName: string; dueDay: string; phone: string }
+type NewForm = { firstName: string; lastName: string; dueDay: string; phone: string; groupId: string }
 type EditForm = { firstName: string; lastName: string; dueDay: string; phone: string }
 
-const EMPTY_FORM: NewForm = { firstName: "", lastName: "", dueDay: "", phone: "" }
+const EMPTY_FORM: NewForm = { firstName: "", lastName: "", dueDay: "", phone: "", groupId: "" }
 const EMPTY_EDIT: EditForm = { firstName: "", lastName: "", dueDay: "", phone: "" }
 
 export default function StudentsView({ gymId }: { gymId: string }) {
@@ -100,6 +103,14 @@ export default function StudentsView({ gymId }: { gymId: string }) {
   const [form, setForm] = useState<NewForm>(EMPTY_FORM)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [gymGroups, setGymGroups] = useState<SimpleGroup[]>([])
+
+  useEffect(() => {
+    if (!showForm) return
+    fetch(`/api/groups?gymId=${gymId}`).then((r) => r.ok ? r.json() : []).then((groups) =>
+      setGymGroups(groups.map((g: { id: string; name: string }) => ({ id: g.id, name: g.name })))
+    )
+  }, [showForm, gymId])
 
   // Detail panel
   const [panelOpen, setPanelOpen] = useState(false)
@@ -275,8 +286,30 @@ export default function StudentsView({ gymId }: { gymId: string }) {
     const res = await fetch("/api/students", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     })
-    if (res.ok) { setForm(EMPTY_FORM); setShowForm(false); await refetch() }
-    else { const d = await res.json().catch(() => ({})); setFormError(d?.error ?? "Error al crear el alumno.") }
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}))
+      setFormError(d?.error ?? "Error al crear el alumno.")
+      setSubmitting(false)
+      return
+    }
+
+    const created = await res.json()
+
+    // Optional: enroll in group
+    if (form.groupId) {
+      const enrollRes = await fetch(`/api/groups/${form.groupId}/students?gymId=${gymId}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId: created.id }),
+      })
+      if (!enrollRes.ok) {
+        setFormError("Alumno creado, pero no se pudo inscribir en el grupo.")
+        setSubmitting(false)
+        await refetch()
+        return
+      }
+    }
+
+    setForm(EMPTY_FORM); setShowForm(false); await refetch()
     setSubmitting(false)
   }
 
@@ -331,6 +364,12 @@ export default function StudentsView({ gymId }: { gymId: string }) {
         </FormField>
         <FormField label="Teléfono">
           <Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Ej: 11 1234-5678" />
+        </FormField>
+        <FormField label="Agregar a grupo">
+          <Select value={form.groupId} onChange={(e) => setForm((f) => ({ ...f, groupId: e.target.value }))}>
+            <option value="">Sin grupo</option>
+            {gymGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </Select>
         </FormField>
       </FormModal>
 
