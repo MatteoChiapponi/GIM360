@@ -139,6 +139,10 @@ Las vistas hijas **NO** deben agregar su propio contenedor raíz con `min-h-scre
 
 ## Reglas de implementación
 
+**0. Modales — NO cerrar al hacer click fuera.**
+- Los modales (`FormModal`, `ConfirmDialog`) solo se cierran con los botones explícitos (Cancelar / Confirmar / Guardar).
+- El backdrop NO debe tener `onClick`. Nunca agregar `onClick={onCancel}` ni similar al backdrop de un modal.
+
 **1. Server vs Client split.**
 - `page.tsx` → Server Component (puede ser async, lee params, llama auth si es necesario)
 - `*View.tsx` → Client Component con `"use client"` (maneja estado, fetch, interacciones)

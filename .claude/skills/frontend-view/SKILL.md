@@ -30,6 +30,9 @@ allowed-tools: Read, Write, Glob, Bash
 - Los errores del servidor deben mostrarse en texto legible, no como JSON ni stack trace. Siempre incluir fallback: `data?.error ?? "Error al guardar. Intentá de nuevo."`.
 - Después de una acción exitosa (create/edit/delete), hacer `refetch()` inmediatamente para que la tabla refleje el cambio sin recargar la página.
 
+**Modales — NO cerrar al hacer click fuera**
+- Los modales (`FormModal`, `ConfirmDialog`) solo se cierran con los botones explícitos (Cancelar / Confirmar / Guardar). El backdrop NO debe tener `onClick`.
+
 **Formularios**
 - Usar `FormModal` — el formulario de creación se abre en un modal centrado con backdrop, no inline. Esto evita confundir al usuario con formularios que aparecen entre el contenido.
 - El botón "Cancelar" siempre limpia el formulario y el error: `setForm(EMPTY_FORM); setFormError(null); setShowForm(false)`.

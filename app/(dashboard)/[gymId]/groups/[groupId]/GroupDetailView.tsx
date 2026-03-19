@@ -34,7 +34,7 @@ type GroupDetail = {
 
 type GymStudent = { id: string; firstName: string; lastName: string }
 type GymTrainer = { id: string; name: string }
-type Tab = "info" | "schedules" | "students" | "trainers"
+type Tab = "info" | "students" | "trainers"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -49,6 +49,9 @@ const DAYS: { value: DayOfWeek; label: string; short: string }[] = [
 ]
 
 const DAY_SHORT: Record<DayOfWeek, string> = Object.fromEntries(DAYS.map((d) => [d.value, d.short])) as Record<DayOfWeek, string>
+
+type NewScheduleForm = { weekDays: DayOfWeek[]; startTime: string; endTime: string; startDate: string }
+const EMPTY_SCHEDULE: NewScheduleForm = { weekDays: [], startTime: "", endTime: "", startDate: "" }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -82,7 +85,6 @@ export default function GroupDetailView({ gymId, groupId }: { gymId: string; gro
       <Tabs
         tabs={[
           { key: "info" as Tab, label: "Info" },
-          { key: "schedules" as Tab, label: "Horarios" },
           { key: "students" as Tab, label: "Alumnos" },
           { key: "trainers" as Tab, label: "Entrenadores" },
         ]}
@@ -91,7 +93,6 @@ export default function GroupDetailView({ gymId, groupId }: { gymId: string; gro
       />
 
       {tab === "info" && <InfoTab group={group} gymId={gymId} groupId={groupId} onRefresh={fetchGroup} />}
-      {tab === "schedules" && <SchedulesTab group={group} gymId={gymId} groupId={groupId} onRefresh={fetchGroup} />}
       {tab === "students" && <StudentsTab group={group} gymId={gymId} groupId={groupId} onRefresh={fetchGroup} />}
       {tab === "trainers" && <TrainersTab group={group} gymId={gymId} groupId={groupId} onRefresh={fetchGroup} />}
     </div>
@@ -105,10 +106,37 @@ type SubTabProps = { group: GroupDetail; gymId: string; groupId: string; onRefre
 // ─── INFO TAB ─────────────────────────────────────────────────────────────────
 
 function InfoTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
+  // ── Edit group state ──
   const [showEditModal, setShowEditModal] = useState(false)
   const [form, setForm] = useState({ name: group.name, monthlyPrice: String(group.monthlyPrice), maxCapacity: group.maxCapacity != null ? String(group.maxCapacity) : "" })
   const [submitting, setSubmitting] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
+
+  // ── Schedule state ──
+  const [showScheduleForm, setShowScheduleForm] = useState(false)
+  const [scheduleForm, setScheduleForm] = useState<NewScheduleForm>(EMPTY_SCHEDULE)
+  const [scheduleSubmitting, setScheduleSubmitting] = useState(false)
+  const [scheduleFormError, setScheduleFormError] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [confirmScheduleId, setConfirmScheduleId] = useState<string | null>(null)
+
+  // ── Edit schedule state ──
+  const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null)
+  const [editScheduleForm, setEditScheduleForm] = useState<NewScheduleForm>(EMPTY_SCHEDULE)
+  const [editScheduleSubmitting, setEditScheduleSubmitting] = useState(false)
+  const [editScheduleError, setEditScheduleError] = useState<string | null>(null)
+
+  // ── Trainer reassignment confirmation ──
+  const [pendingScheduleEdit, setPendingScheduleEdit] = useState<{
+    scheduleId: string
+    newData: NewScheduleForm
+    autoReassign: AssignedTrainer[]
+    adapt: AssignedTrainer[]
+    unassign: { trainer: AssignedTrainer; remainingSchedules: { weekDay: DayOfWeek; startTime: string; endTime: string }[] }[]
+  } | null>(null)
+
+  // ── Warning after edit ──
+  const [unassignedWarning, setUnassignedWarning] = useState<{ name: string; reason: string }[] | null>(null)
 
   function startEdit() {
     setForm({ name: group.name, monthlyPrice: String(group.monthlyPrice), maxCapacity: group.maxCapacity != null ? String(group.maxCapacity) : "" })
@@ -133,8 +161,274 @@ function InfoTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
     setSubmitting(false)
   }
 
+  function toggleDay(day: DayOfWeek) {
+    setScheduleForm((f) => ({ ...f, weekDays: f.weekDays.includes(day) ? f.weekDays.filter((d) => d !== day) : [...f.weekDays, day] }))
+  }
+
+  function toggleEditDay(day: DayOfWeek) {
+    setEditScheduleForm((f) => ({ ...f, weekDays: f.weekDays.includes(day) ? f.weekDays.filter((d) => d !== day) : [...f.weekDays, day] }))
+  }
+
+  function startEditSchedule(s: Schedule) {
+    setEditingSchedule(s)
+    setEditScheduleForm({
+      weekDays: [...s.weekDays],
+      startTime: s.startTime,
+      endTime: s.endTime,
+      startDate: s.startDate.split("T")[0],
+    })
+    setEditScheduleError(null)
+  }
+
+  async function handleEditScheduleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setEditScheduleError(null)
+
+    if (editScheduleForm.weekDays.length === 0) { setEditScheduleError("Seleccioná al menos un día."); return }
+    if (!editScheduleForm.startTime) { setEditScheduleError("La hora de inicio es obligatoria."); return }
+    if (!editScheduleForm.endTime) { setEditScheduleError("La hora de fin es obligatoria."); return }
+    if (!editScheduleForm.startDate) { setEditScheduleError("La fecha de inicio es obligatoria."); return }
+
+    const oldSchedule = editingSchedule!
+
+    // Build map of ALL group schedule days (using current/old data)
+    const allGroupDayMap: Map<DayOfWeek, { startTime: string; endTime: string }> = new Map()
+    for (const s of group.schedules) {
+      for (const d of s.weekDays) {
+        allGroupDayMap.set(d, { startTime: s.startTime, endTime: s.endTime })
+      }
+    }
+
+    const autoReassign: AssignedTrainer[] = []
+    const adapt: AssignedTrainer[] = [] // trainers that covered old schedule fully but not 100% of all group days — clamp to new times
+    const unassign: { trainer: AssignedTrainer; remainingSchedules: { weekDay: DayOfWeek; startTime: string; endTime: string }[] }[] = []
+
+    const oldDays = new Set(oldSchedule.weekDays)
+    const newStart = timeToMinutes(editScheduleForm.startTime)
+    const newEnd = timeToMinutes(editScheduleForm.endTime)
+
+    for (const t of group.trainers) {
+      const hasAffectedSchedules = t.schedules.some((s) => oldDays.has(s.weekDay))
+      if (!hasAffectedSchedules) continue
+
+      // Check if trainer covers 100% of ALL group schedule days
+      let fullCoverage = true
+      for (const [day, times] of allGroupDayMap.entries()) {
+        const entry = t.schedules.find((s) => s.weekDay === day)
+        if (!entry || entry.startTime !== times.startTime || entry.endTime !== times.endTime) {
+          fullCoverage = false
+          break
+        }
+      }
+
+      if (fullCoverage) {
+        autoReassign.push(t)
+        continue
+      }
+
+      // Check per-day relationship between trainer entry and new schedule on affected days
+      const hasAllNewDays = editScheduleForm.weekDays.every((day) =>
+        t.schedules.some((s) => s.weekDay === day)
+      )
+
+      if (hasAllNewDays) {
+        // Trainer has entries on all new days — check overlap direction
+        let relation: "exact" | "trainer-covers" | "new-covers" | "partial" = "partial"
+
+        const trainerCoversOrEquals = editScheduleForm.weekDays.every((day) => {
+          const entry = t.schedules.find((s) => s.weekDay === day)!
+          return timeToMinutes(entry.startTime) <= newStart && timeToMinutes(entry.endTime) >= newEnd
+        })
+
+        if (trainerCoversOrEquals) {
+          // Check if it's an exact match (no change needed) vs trainer being wider (needs clamp)
+          const exactMatch = editScheduleForm.weekDays.every((day) => {
+            const entry = t.schedules.find((s) => s.weekDay === day)!
+            return entry.startTime === editScheduleForm.startTime && entry.endTime === editScheduleForm.endTime
+          })
+          relation = exactMatch ? "exact" : "trainer-covers"
+        } else {
+          const newCoversTrainer = editScheduleForm.weekDays.every((day) => {
+            const entry = t.schedules.find((s) => s.weekDay === day)!
+            return newStart <= timeToMinutes(entry.startTime) && newEnd >= timeToMinutes(entry.endTime)
+          })
+          if (newCoversTrainer) relation = "new-covers"
+        }
+
+        if (relation === "exact" || relation === "new-covers") {
+          // Trainer already satisfies the new schedule — no action needed
+          continue
+        }
+        if (relation === "trainer-covers") {
+          // Trainer covers more than new schedule — clamp to new range
+          adapt.push(t)
+          continue
+        }
+      }
+
+      // Partial coverage — unassign from affected days
+      const remaining = t.schedules
+        .filter((s) => !oldDays.has(s.weekDay))
+        .map((s) => ({ weekDay: s.weekDay, startTime: s.startTime, endTime: s.endTime }))
+      unassign.push({ trainer: t, remainingSchedules: remaining })
+    }
+
+    if (unassign.length > 0) {
+      setPendingScheduleEdit({
+        scheduleId: oldSchedule.id,
+        newData: { ...editScheduleForm },
+        autoReassign,
+        adapt,
+        unassign,
+      })
+      return
+    }
+
+    await executeScheduleEdit(oldSchedule.id, editScheduleForm, autoReassign, adapt, [])
+  }
+
+  async function executeScheduleEdit(
+    scheduleId: string,
+    newData: NewScheduleForm,
+    autoReassign: AssignedTrainer[],
+    adapt: AssignedTrainer[],
+    unassign: { trainer: AssignedTrainer; remainingSchedules: { weekDay: DayOfWeek; startTime: string; endTime: string }[] }[],
+  ) {
+    setEditScheduleSubmitting(true)
+
+    const res = await fetch(`/api/schedules/${scheduleId}?gymId=${gymId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        weekDays: newData.weekDays,
+        startTime: newData.startTime,
+        endTime: newData.endTime,
+        startDate: new Date(newData.startDate).toISOString(),
+      }),
+    })
+
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}))
+      setEditScheduleError(d?.error ?? "Error al editar el horario.")
+      setEditScheduleSubmitting(false)
+      return
+    }
+
+    const warnings: { name: string; reason: string }[] = []
+    const oldSchedule = editingSchedule!
+    const oldDays = new Set(oldSchedule.weekDays)
+
+    // Helper: deduplicate schedule entries by day (last write wins — new entries override existing)
+    function dedupeByDay(entries: { weekDay: DayOfWeek; startTime: string; endTime: string }[]) {
+      const map = new Map<DayOfWeek, { weekDay: DayOfWeek; startTime: string; endTime: string }>()
+      for (const e of entries) map.set(e.weekDay, e)
+      return Array.from(map.values())
+    }
+
+    for (const t of autoReassign) {
+      const kept = t.schedules
+        .filter((s) => !oldDays.has(s.weekDay))
+        .map((s) => ({ weekDay: s.weekDay, startTime: s.startTime, endTime: s.endTime }))
+
+      for (const day of newData.weekDays) {
+        kept.push({ weekDay: day, startTime: newData.startTime, endTime: newData.endTime })
+      }
+
+      await fetch(`/api/groups/${groupId}/trainers/${t.trainer.id}?gymId=${gymId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hourlyRate: Number(t.hourlyRate), schedules: dedupeByDay(kept) }),
+      })
+    }
+
+    // Adapt trainers: covered >= new schedule on affected days — clamp to new range
+    for (const t of adapt) {
+      const kept = t.schedules
+        .filter((s) => !oldDays.has(s.weekDay))
+        .map((s) => ({ weekDay: s.weekDay, startTime: s.startTime, endTime: s.endTime }))
+
+      for (const day of newData.weekDays) {
+        const existing = t.schedules.find((s) => s.weekDay === day)
+        if (existing) {
+          // Clamp: intersection of trainer range and new schedule range
+          const clampedStart = Math.max(timeToMinutes(existing.startTime), timeToMinutes(newData.startTime))
+          const clampedEnd = Math.min(timeToMinutes(existing.endTime), timeToMinutes(newData.endTime))
+          kept.push({ weekDay: day, startTime: minutesToTime(clampedStart), endTime: minutesToTime(clampedEnd) })
+        } else {
+          kept.push({ weekDay: day, startTime: newData.startTime, endTime: newData.endTime })
+        }
+      }
+
+      await fetch(`/api/groups/${groupId}/trainers/${t.trainer.id}?gymId=${gymId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hourlyRate: Number(t.hourlyRate), schedules: dedupeByDay(kept) }),
+      })
+    }
+
+    for (const { trainer: t, remainingSchedules } of unassign) {
+      if (remainingSchedules.length === 0) {
+        await fetch(`/api/groups/${groupId}/trainers/${t.trainer.id}?gymId=${gymId}`, { method: "DELETE" })
+        warnings.push({
+          name: t.trainer.name,
+          reason: "No cubría el 100% de los horarios del grupo. Fue removido del grupo porque no tenía otros horarios asignados.",
+        })
+      } else {
+        await fetch(`/api/groups/${groupId}/trainers/${t.trainer.id}?gymId=${gymId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hourlyRate: Number(t.hourlyRate), schedules: remainingSchedules }),
+        })
+        const removedDayNames = oldSchedule.weekDays
+          .filter((d) => t.schedules.some((s) => s.weekDay === d))
+          .map((d) => DAY_SHORT[d])
+          .join(", ")
+        warnings.push({
+          name: t.trainer.name,
+          reason: `No cubría el 100% de los horarios del grupo. Fue desasignado de: ${removedDayNames}. Deberás reasignarlo manualmente.`,
+        })
+      }
+    }
+
+    setEditingSchedule(null)
+    setEditScheduleForm(EMPTY_SCHEDULE)
+    setEditScheduleSubmitting(false)
+    setPendingScheduleEdit(null)
+
+    if (warnings.length > 0) {
+      setUnassignedWarning(warnings)
+    }
+
+    await onRefresh()
+  }
+
+  async function handleAddSchedule(e: React.FormEvent) {
+    e.preventDefault(); setScheduleFormError(null)
+    if (scheduleForm.weekDays.length === 0) { setScheduleFormError("Seleccioná al menos un día."); return }
+    if (!scheduleForm.startTime) { setScheduleFormError("La hora de inicio es obligatoria."); return }
+    if (!scheduleForm.endTime) { setScheduleFormError("La hora de fin es obligatoria."); return }
+    if (!scheduleForm.startDate) { setScheduleFormError("La fecha de inicio es obligatoria."); return }
+
+    setScheduleSubmitting(true)
+    const res = await fetch(`/api/schedules?gymId=${gymId}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groupId, weekDays: scheduleForm.weekDays, startTime: scheduleForm.startTime, endTime: scheduleForm.endTime, startDate: new Date(scheduleForm.startDate).toISOString() }),
+    })
+    if (res.ok) { setScheduleForm(EMPTY_SCHEDULE); setShowScheduleForm(false); await onRefresh() }
+    else { const d = await res.json().catch(() => ({})); setScheduleFormError(d?.error ?? "Error al agregar el horario.") }
+    setScheduleSubmitting(false)
+  }
+
+  async function handleDeleteSchedule(scheduleId: string) {
+    setDeletingId(scheduleId)
+    const res = await fetch(`/api/schedules/${scheduleId}?gymId=${gymId}`, { method: "DELETE" })
+    if (res.ok) await onRefresh()
+    setDeletingId(null)
+  }
+
   return (
     <>
+      {/* ── Group info card ── */}
       <div className="rounded-xl border border-[#E5E4E0] bg-white px-5 py-5 space-y-5">
         <div className="flex items-center justify-between">
           <p className="text-sm font-semibold text-[#111110]">Información del grupo</p>
@@ -157,6 +451,81 @@ function InfoTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
         </dl>
       </div>
 
+      {/* ── Schedules section ── */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold text-[#111110]">Horarios</p>
+          <Button onClick={() => { setShowScheduleForm(true); setScheduleFormError(null); setScheduleForm(EMPTY_SCHEDULE) }}>+ Agregar horario</Button>
+        </div>
+
+        {unassignedWarning && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-amber-900">Entrenadores desasignados</p>
+              <button onClick={() => setUnassignedWarning(null)} className="cursor-pointer text-xs text-amber-700 hover:text-amber-900">Cerrar</button>
+            </div>
+            {unassignedWarning.map((w, i) => (
+              <p key={i} className="text-xs text-amber-700"><span className="font-medium">{w.name}:</span> {w.reason}</p>
+            ))}
+          </div>
+        )}
+
+        <div className="rounded-xl border border-[#E5E4E0] bg-white overflow-hidden">
+          {group.schedules.length === 0 ? (
+            <div className="py-16 text-center"><p className="text-sm text-[#68685F]">No hay horarios configurados.</p></div>
+          ) : (
+            <div className="divide-y divide-[#F0EFEB]">
+              {group.schedules.map((s) => (
+                <div key={s.id} className="px-5 py-4 hover:bg-[#FAFAF9] transition-colors space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap gap-1.5">
+                        {s.weekDays.map((d) => (
+                          <span key={d} className="rounded-md bg-[#F0EFEB] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#68685F]">{DAY_SHORT[d]}</span>
+                        ))}
+                      </div>
+                      <p className="text-sm text-[#111110] font-medium">{s.startTime} – {s.endTime}</p>
+                      <p className="text-xs text-[#A5A49D]">Desde {new Date(s.startDate).toLocaleDateString("es-AR")}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button onClick={() => startEditSchedule(s)}>Editar</Button>
+                      <Button variant="danger" onClick={() => setConfirmScheduleId(s.id)} disabled={deletingId === s.id}>
+                        {deletingId === s.id ? "…" : "Eliminar"}
+                      </Button>
+                    </div>
+                  </div>
+                  {/* Cobertura por día de este horario */}
+                  <div className="flex flex-wrap gap-2">
+                    {s.weekDays.map((d) => {
+                      const trainerEntries = group.trainers.flatMap((t) =>
+                        t.schedules.filter((ts) => ts.weekDay === d)
+                      )
+                      const { fullyСovered } = computeCoverage(s.startTime, s.endTime, trainerEntries)
+                      const trainersOnDay = group.trainers
+                        .filter((t) => t.schedules.some((ts) => ts.weekDay === d))
+                        .map((t) => t.trainer.name)
+
+                      return (
+                        <div key={d} className="flex items-center gap-1.5 rounded-md border border-[#E5E4E0] px-2 py-1">
+                          <div className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                            fullyСovered ? "bg-emerald-500" : trainerEntries.length > 0 ? "bg-amber-400" : "bg-red-400"
+                          }`} />
+                          <span className="text-[11px] font-medium text-[#111110]">{DAY_SHORT[d]}</span>
+                          <span className="text-[10px] text-[#A5A49D]">
+                            {trainersOnDay.length > 0 ? trainersOnDay.join(", ") : "sin entrenador"}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Edit group modal ── */}
       <FormModal
         open={showEditModal}
         title="Editar grupo"
@@ -176,72 +545,22 @@ function InfoTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
           <NumberInput integer value={form.maxCapacity} onChange={(e) => setForm((f) => ({ ...f, maxCapacity: e.target.value }))} placeholder="Sin límite" />
         </FormField>
       </FormModal>
-    </>
-  )
-}
 
-// ─── SCHEDULES TAB ────────────────────────────────────────────────────────────
-
-type NewScheduleForm = { weekDays: DayOfWeek[]; startTime: string; endTime: string; startDate: string }
-const EMPTY_SCHEDULE: NewScheduleForm = { weekDays: [], startTime: "", endTime: "", startDate: "" }
-
-function SchedulesTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
-  const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState<NewScheduleForm>(EMPTY_SCHEDULE)
-  const [submitting, setSubmitting] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [confirmScheduleId, setConfirmScheduleId] = useState<string | null>(null)
-
-  function toggleDay(day: DayOfWeek) {
-    setForm((f) => ({ ...f, weekDays: f.weekDays.includes(day) ? f.weekDays.filter((d) => d !== day) : [...f.weekDays, day] }))
-  }
-
-  async function handleAdd(e: React.FormEvent) {
-    e.preventDefault(); setFormError(null)
-    if (form.weekDays.length === 0) { setFormError("Seleccioná al menos un día."); return }
-    if (!form.startTime) { setFormError("La hora de inicio es obligatoria."); return }
-    if (!form.endTime) { setFormError("La hora de fin es obligatoria."); return }
-    if (!form.startDate) { setFormError("La fecha de inicio es obligatoria."); return }
-
-    setSubmitting(true)
-    const res = await fetch(`/api/schedules?gymId=${gymId}`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupId, weekDays: form.weekDays, startTime: form.startTime, endTime: form.endTime, startDate: new Date(form.startDate).toISOString() }),
-    })
-    if (res.ok) { setForm(EMPTY_SCHEDULE); setShowForm(false); await onRefresh() }
-    else { const d = await res.json().catch(() => ({})); setFormError(d?.error ?? "Error al agregar el horario.") }
-    setSubmitting(false)
-  }
-
-  async function handleDelete(scheduleId: string) {
-    setDeletingId(scheduleId)
-    const res = await fetch(`/api/schedules/${scheduleId}?gymId=${gymId}`, { method: "DELETE" })
-    if (res.ok) await onRefresh()
-    setDeletingId(null)
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-[#111110]">Horarios</p>
-        <Button onClick={() => { setShowForm(true); setFormError(null); setForm(EMPTY_SCHEDULE) }}>+ Agregar horario</Button>
-      </div>
-
+      {/* ── Add schedule modal ── */}
       <FormModal
-        open={showForm}
+        open={showScheduleForm}
         title="Nuevo horario"
-        error={formError}
-        onSubmit={handleAdd}
-        submitting={submitting}
-        onCancel={() => { setShowForm(false); setForm(EMPTY_SCHEDULE); setFormError(null) }}
+        error={scheduleFormError}
+        onSubmit={handleAddSchedule}
+        submitting={scheduleSubmitting}
+        onCancel={() => { setShowScheduleForm(false); setScheduleForm(EMPTY_SCHEDULE); setScheduleFormError(null) }}
         gridCols="sm:grid-cols-3"
       >
         <div className="sm:col-span-3 flex flex-col gap-1.5">
           <Label>Días *</Label>
           <div className="flex flex-wrap gap-2">
             {DAYS.map((d) => {
-              const checked = form.weekDays.includes(d.value)
+              const checked = scheduleForm.weekDays.includes(d.value)
               return (
                 <button key={d.value} type="button" onClick={() => toggleDay(d.value)}
                   className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
@@ -253,76 +572,104 @@ function SchedulesTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
           </div>
         </div>
         <FormField label="Hora inicio" required>
-          <Input type="time" value={form.startTime} onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))} />
+          <Input type="time" value={scheduleForm.startTime} onChange={(e) => setScheduleForm((f) => ({ ...f, startTime: e.target.value }))} />
         </FormField>
         <FormField label="Hora fin" required>
-          <Input type="time" value={form.endTime} onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))} />
+          <Input type="time" value={scheduleForm.endTime} onChange={(e) => setScheduleForm((f) => ({ ...f, endTime: e.target.value }))} />
         </FormField>
         <FormField label="Fecha inicio" required>
-          <Input type="date" value={form.startDate} onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))} />
+          <Input type="date" value={scheduleForm.startDate} onChange={(e) => setScheduleForm((f) => ({ ...f, startDate: e.target.value }))} />
         </FormField>
       </FormModal>
 
-      <div className="rounded-xl border border-[#E5E4E0] bg-white overflow-hidden">
-        {group.schedules.length === 0 ? (
-          <div className="py-16 text-center"><p className="text-sm text-[#68685F]">No hay horarios configurados.</p></div>
-        ) : (
-          <div className="divide-y divide-[#F0EFEB]">
-            {group.schedules.map((s) => (
-              <div key={s.id} className="px-5 py-4 hover:bg-[#FAFAF9] transition-colors space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1.5">
-                    <div className="flex flex-wrap gap-1.5">
-                      {s.weekDays.map((d) => (
-                        <span key={d} className="rounded-md bg-[#F0EFEB] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#68685F]">{DAY_SHORT[d]}</span>
-                      ))}
-                    </div>
-                    <p className="text-sm text-[#111110] font-medium">{s.startTime} – {s.endTime}</p>
-                    <p className="text-xs text-[#A5A49D]">Desde {new Date(s.startDate).toLocaleDateString("es-AR")}</p>
-                  </div>
-                  <Button variant="danger" onClick={() => setConfirmScheduleId(s.id)} disabled={deletingId === s.id}>
-                    {deletingId === s.id ? "…" : "Eliminar"}
-                  </Button>
-                </div>
-                {/* Cobertura por día de este horario */}
-                <div className="flex flex-wrap gap-2">
-                  {s.weekDays.map((d) => {
-                    const trainerEntries = group.trainers.flatMap((t) =>
-                      t.schedules.filter((ts) => ts.weekDay === d)
-                    )
-                    const { fullyСovered } = computeCoverage(s.startTime, s.endTime, trainerEntries)
-                    const trainersOnDay = group.trainers
-                      .filter((t) => t.schedules.some((ts) => ts.weekDay === d))
-                      .map((t) => t.trainer.name)
-
-                    return (
-                      <div key={d} className="flex items-center gap-1.5 rounded-md border border-[#E5E4E0] px-2 py-1">
-                        <div className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                          fullyСovered ? "bg-emerald-500" : trainerEntries.length > 0 ? "bg-amber-400" : "bg-red-400"
-                        }`} />
-                        <span className="text-[11px] font-medium text-[#111110]">{DAY_SHORT[d]}</span>
-                        <span className="text-[10px] text-[#A5A49D]">
-                          {trainersOnDay.length > 0 ? trainersOnDay.join(", ") : "sin entrenador"}
-                        </span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            ))}
+      {/* ── Edit schedule modal ── */}
+      <FormModal
+        open={editingSchedule !== null}
+        title="Editar horario"
+        error={editScheduleError}
+        onSubmit={handleEditScheduleSubmit}
+        submitting={editScheduleSubmitting}
+        onCancel={() => { setEditingSchedule(null); setEditScheduleForm(EMPTY_SCHEDULE); setEditScheduleError(null) }}
+        gridCols="sm:grid-cols-3"
+      >
+        <div className="sm:col-span-3 flex flex-col gap-1.5">
+          <Label>Días *</Label>
+          <div className="flex flex-wrap gap-2">
+            {DAYS.map((d) => {
+              const checked = editScheduleForm.weekDays.includes(d.value)
+              return (
+                <button key={d.value} type="button" onClick={() => toggleEditDay(d.value)}
+                  className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                    checked ? "bg-[#111110] text-white" : "border border-[#E5E4E0] text-[#68685F] hover:bg-[#F0EFEB] hover:text-[#111110]"
+                  }`}
+                >{d.short}</button>
+              )
+            })}
           </div>
-        )}
-      </div>
+        </div>
+        <FormField label="Hora inicio" required>
+          <Input type="time" value={editScheduleForm.startTime} onChange={(e) => setEditScheduleForm((f) => ({ ...f, startTime: e.target.value }))} />
+        </FormField>
+        <FormField label="Hora fin" required>
+          <Input type="time" value={editScheduleForm.endTime} onChange={(e) => setEditScheduleForm((f) => ({ ...f, endTime: e.target.value }))} />
+        </FormField>
+        <FormField label="Fecha inicio" required>
+          <Input type="date" value={editScheduleForm.startDate} onChange={(e) => setEditScheduleForm((f) => ({ ...f, startDate: e.target.value }))} />
+        </FormField>
+      </FormModal>
 
+      {/* ── Confirm delete schedule dialog ── */}
       <ConfirmDialog
         open={confirmScheduleId !== null}
         title="Eliminar horario"
         message="Esta acción no se puede deshacer. El horario se eliminará permanentemente."
         confirmLabel="Eliminar"
-        onConfirm={() => { const id = confirmScheduleId!; setConfirmScheduleId(null); handleDelete(id) }}
+        onConfirm={() => { const id = confirmScheduleId!; setConfirmScheduleId(null); handleDeleteSchedule(id) }}
         onCancel={() => setConfirmScheduleId(null)}
       />
-    </div>
+
+      {/* ── Pending trainer reassignment confirmation ── */}
+      {pendingScheduleEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" />
+          <div className="relative w-full max-w-md rounded-2xl border border-[#E5E4E0] bg-white px-6 py-6 shadow-xl space-y-4">
+            <p className="text-[15px] font-semibold text-[#111110]">Entrenadores afectados</p>
+            <p className="text-sm text-[#68685F]">
+              Los siguientes entrenadores no cubren el 100% de los horarios del grupo y serán desasignados de los días afectados:
+            </p>
+            <ul className="space-y-2">
+              {pendingScheduleEdit.unassign.map(({ trainer: t, remainingSchedules }) => (
+                <li key={t.id} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                  <p className="text-sm font-medium text-amber-900">{t.trainer.name}</p>
+                  <p className="text-xs text-amber-700">
+                    {remainingSchedules.length === 0
+                      ? "Será removido del grupo (no tiene otros horarios asignados)."
+                      : `Será desasignado de: ${editingSchedule!.weekDays.filter((d) => t.schedules.some((s) => s.weekDay === d)).map((d) => DAY_SHORT[d]).join(", ")}`
+                    }
+                  </p>
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-[#68685F]">Deberás reasignarlos manualmente después de confirmar.</p>
+            <div className="flex items-center justify-end gap-3 pt-1">
+              <Button variant="secondary" onClick={() => setPendingScheduleEdit(null)}>Cancelar</Button>
+              <Button
+                onClick={() => executeScheduleEdit(
+                  pendingScheduleEdit.scheduleId,
+                  pendingScheduleEdit.newData,
+                  pendingScheduleEdit.autoReassign,
+                  pendingScheduleEdit.adapt,
+                  pendingScheduleEdit.unassign,
+                )}
+                disabled={editScheduleSubmitting}
+              >
+                {editScheduleSubmitting ? "Guardando…" : "Confirmar y editar"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -337,8 +684,23 @@ function StudentsTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
   const [unenrollingId, setUnenrollingId] = useState<string | null>(null)
   const [showPicker, setShowPicker] = useState(false)
   const [confirmStudentId, setConfirmStudentId] = useState<string | null>(null)
+  const [paidCount, setPaidCount] = useState<number | null>(null)
 
   const enrolledIds = new Set(group.students.map((s) => s.student.id))
+
+  // Fetch payment status for current period to count paid students in this group
+  useEffect(() => {
+    const now = new Date()
+    const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+    fetch(`/api/payments?gymId=${gymId}&period=${period}`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((payments: { studentId: string; status: string }[]) => {
+        const groupStudentIds = new Set(group.students.map((s) => s.student.id))
+        const paid = payments.filter((p) => groupStudentIds.has(p.studentId) && p.status === "PAID").length
+        setPaidCount(paid)
+      })
+      .catch(() => setPaidCount(null))
+  }, [gymId, group.students])
 
   async function loadGymStudents() {
     setLoadingPicker(true)
@@ -405,6 +767,36 @@ function StudentsTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
           </FormField>
         )}
       </FormModal>
+
+      {/* Quick stats */}
+      {group.students.length > 0 && (
+        <div className="flex flex-wrap gap-3">
+          <div className="flex items-center gap-2 rounded-lg border border-[#E5E4E0] bg-white px-3 py-2">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Ocupación</span>
+            <span className="text-sm font-mono font-medium text-[#111110]">
+              {group.students.length}{group.maxCapacity != null ? `/${group.maxCapacity}` : ""}
+            </span>
+            {group.maxCapacity != null && (
+              <span className={`text-xs font-medium ${group.students.length >= group.maxCapacity ? "text-red-600" : group.students.length >= group.maxCapacity * 0.8 ? "text-amber-600" : "text-emerald-600"}`}>
+                ({Math.round((group.students.length / group.maxCapacity) * 100)}%)
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border border-[#E5E4E0] bg-white px-3 py-2">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Cuota del mes</span>
+            {paidCount !== null ? (
+              <>
+                <span className="text-sm font-mono font-medium text-[#111110]">{paidCount}/{group.students.length}</span>
+                <span className={`text-xs font-medium ${paidCount === group.students.length ? "text-emerald-600" : paidCount > 0 ? "text-amber-600" : "text-red-600"}`}>
+                  pagaron
+                </span>
+              </>
+            ) : (
+              <span className="text-xs text-[#A5A49D]">…</span>
+            )}
+          </div>
+        </div>
+      )}
 
       <DataTable
         columns={[
@@ -931,7 +1323,7 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
               )
             })()}
           </div>
-          <div className="space-y-4">
+          <div className="space-y-5">
             {DAYS.filter((d) => groupDayMap[d.value]).map((d) => {
               const groupTimes = groupDayMap[d.value]!
               const gStart = timeToMinutes(groupTimes.startTime)
@@ -957,70 +1349,73 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
                     <span className="text-xs text-[#A5A49D]">{groupTimes.startTime}–{groupTimes.endTime}</span>
                   </div>
 
-                  {/* Visual timeline bar */}
-                  <div className="ml-4 space-y-1.5">
-                    {/* Group range bar (background) */}
-                    <div className="relative h-5 w-full rounded bg-[#F0EFEB] overflow-hidden">
-                      {/* Covered segments (green) */}
-                      {trainerEntries.flatMap((t) =>
-                        t.entries.map((e, i) => {
-                          const eStart = Math.max(timeToMinutes(e.startTime), gStart)
-                          const eEnd = Math.min(timeToMinutes(e.endTime), gEnd)
-                          if (eStart >= eEnd) return null
-                          const left = ((eStart - gStart) / totalMinutes) * 100
-                          const width = ((eEnd - eStart) / totalMinutes) * 100
-                          return (
-                            <div
-                              key={`${t.name}-${i}`}
-                              className="absolute top-0 h-full bg-emerald-400/60"
-                              style={{ left: `${left}%`, width: `${width}%` }}
-                              title={`${t.name}: ${e.startTime}–${e.endTime}`}
-                            />
-                          )
-                        })
-                      )}
-                      {/* Gap segments (red) */}
-                      {gaps.map((g, i) => {
-                        const left = ((g.start - gStart) / totalMinutes) * 100
-                        const width = ((g.end - g.start) / totalMinutes) * 100
-                        return (
-                          <div
-                            key={`gap-${i}`}
-                            className="absolute top-0 h-full bg-red-300/40"
-                            style={{ left: `${left}%`, width: `${width}%` }}
-                            title={`Sin cobertura: ${minutesToTime(g.start)}–${minutesToTime(g.end)}`}
-                          />
-                        )
-                      })}
-                      {/* Time labels */}
-                      <span className="absolute left-1 top-0.5 text-[9px] font-mono text-[#68685F]">{groupTimes.startTime}</span>
-                      <span className="absolute right-1 top-0.5 text-[9px] font-mono text-[#68685F]">{groupTimes.endTime}</span>
+                  {/* Per-trainer timeline bars */}
+                  <div className="ml-4 space-y-1">
+                    {/* Time axis labels */}
+                    <div className="flex items-center justify-between px-0.5">
+                      <span className="text-[9px] font-mono text-[#A5A49D]">{groupTimes.startTime}</span>
+                      <span className="text-[9px] font-mono text-[#A5A49D]">{groupTimes.endTime}</span>
                     </div>
 
-                    {/* Trainer detail per day */}
                     {trainerEntries.length > 0 ? (
-                      <div className="flex flex-wrap gap-x-4 gap-y-1">
+                      <>
+                        {/* One bar per trainer */}
                         {trainerEntries.map((t) => (
-                          <span key={t.name} className="text-xs text-[#68685F]">
-                            <span className="font-medium text-[#111110]">{t.name}</span>
-                            {" "}
-                            {t.entries.map((e, i) => (
-                              <span key={i}>{i > 0 && ", "}{e.startTime}–{e.endTime}</span>
-                            ))}
-                          </span>
+                          <div key={t.name} className="flex items-center gap-2">
+                            <span className="w-[80px] shrink-0 truncate text-[11px] font-medium text-[#111110]" title={t.name}>{t.name}</span>
+                            <div className="relative h-4 flex-1 rounded bg-[#F0EFEB] overflow-hidden">
+                              {t.entries.map((e, i) => {
+                                const eStart = Math.max(timeToMinutes(e.startTime), gStart)
+                                const eEnd = Math.min(timeToMinutes(e.endTime), gEnd)
+                                if (eStart >= eEnd) return null
+                                const left = ((eStart - gStart) / totalMinutes) * 100
+                                const width = ((eEnd - eStart) / totalMinutes) * 100
+                                return (
+                                  <div
+                                    key={i}
+                                    className="absolute top-0 h-full rounded bg-emerald-400/70"
+                                    style={{ left: `${left}%`, width: `${width}%` }}
+                                    title={`${e.startTime}–${e.endTime}`}
+                                  />
+                                )
+                              })}
+                            </div>
+                            <span className="shrink-0 text-[10px] text-[#A5A49D]">
+                              {t.entries.map((e, i) => <span key={i}>{i > 0 && ", "}{e.startTime}–{e.endTime}</span>)}
+                            </span>
+                          </div>
                         ))}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-red-600">Sin entrenador asignado para este día.</p>
-                    )}
 
-                    {/* Gaps detail */}
-                    {gaps.length > 0 && trainerEntries.length > 0 && (
-                      <p className="text-xs text-amber-700">
-                        Huecos sin cubrir: {gaps.map((g, i) => (
-                          <span key={i}>{i > 0 && ", "}{minutesToTime(g.start)}–{minutesToTime(g.end)} ({g.end - g.start} min)</span>
-                        ))}
-                      </p>
+                        {/* Gap bar — only if there are uncovered segments */}
+                        {gaps.length > 0 && (
+                          <div className="flex items-center gap-2">
+                            <span className="w-[80px] shrink-0 text-[11px] font-medium text-red-600">Sin cubrir</span>
+                            <div className="relative h-4 flex-1 rounded bg-[#F0EFEB] overflow-hidden">
+                              {gaps.map((g, i) => {
+                                const left = ((g.start - gStart) / totalMinutes) * 100
+                                const width = ((g.end - g.start) / totalMinutes) * 100
+                                return (
+                                  <div
+                                    key={i}
+                                    className="absolute top-0 h-full rounded bg-red-300/50"
+                                    style={{ left: `${left}%`, width: `${width}%` }}
+                                    title={`${minutesToTime(g.start)}–${minutesToTime(g.end)}`}
+                                  />
+                                )
+                              })}
+                            </div>
+                            <span className="shrink-0 text-[10px] text-red-600">
+                              {gaps.map((g, i) => <span key={i}>{i > 0 && ", "}{minutesToTime(g.start)}–{minutesToTime(g.end)}</span>)}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="w-[80px] shrink-0 text-[11px] font-medium text-red-600">Sin cubrir</span>
+                        <div className="relative h-4 flex-1 rounded bg-red-300/50 overflow-hidden" />
+                        <span className="shrink-0 text-[10px] text-red-600">{groupTimes.startTime}–{groupTimes.endTime}</span>
+                      </div>
                     )}
                   </div>
                 </div>
