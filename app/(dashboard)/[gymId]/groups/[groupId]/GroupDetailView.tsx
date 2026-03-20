@@ -1363,7 +1363,7 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
                         {trainerEntries.map((t) => (
                           <div key={t.name} className="flex items-center gap-2">
                             <span className="w-[80px] shrink-0 truncate text-[11px] font-medium text-[#111110]" title={t.name}>{t.name}</span>
-                            <div className="relative h-4 flex-1 rounded bg-[#F0EFEB] overflow-hidden">
+                            <div className="relative h-7 flex-1 rounded bg-[#F0EFEB] overflow-hidden">
                               {t.entries.map((e, i) => {
                                 const eStart = Math.max(timeToMinutes(e.startTime), gStart)
                                 const eEnd = Math.min(timeToMinutes(e.endTime), gEnd)
@@ -1373,16 +1373,16 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
                                 return (
                                   <div
                                     key={i}
-                                    className="absolute top-0 h-full rounded bg-emerald-400/70"
+                                    className="absolute top-0 h-full rounded bg-emerald-400/70 flex items-center justify-between px-1.5"
                                     style={{ left: `${left}%`, width: `${width}%` }}
                                     title={`${e.startTime}–${e.endTime}`}
-                                  />
+                                  >
+                                    <span className="text-[10px] font-mono font-bold text-emerald-900">{e.startTime}</span>
+                                    <span className="text-[10px] font-mono font-bold text-emerald-900">{e.endTime}</span>
+                                  </div>
                                 )
                               })}
                             </div>
-                            <span className="shrink-0 text-[10px] text-[#A5A49D]">
-                              {t.entries.map((e, i) => <span key={i}>{i > 0 && ", "}{e.startTime}–{e.endTime}</span>)}
-                            </span>
                           </div>
                         ))}
 
@@ -1390,31 +1390,33 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
                         {gaps.length > 0 && (
                           <div className="flex items-center gap-2">
                             <span className="w-[80px] shrink-0 text-[11px] font-medium text-red-600">Sin cubrir</span>
-                            <div className="relative h-4 flex-1 rounded bg-[#F0EFEB] overflow-hidden">
+                            <div className="relative h-7 flex-1 rounded bg-[#F0EFEB] overflow-hidden">
                               {gaps.map((g, i) => {
                                 const left = ((g.start - gStart) / totalMinutes) * 100
                                 const width = ((g.end - g.start) / totalMinutes) * 100
                                 return (
                                   <div
                                     key={i}
-                                    className="absolute top-0 h-full rounded bg-red-300/50"
+                                    className="absolute top-0 h-full rounded bg-red-300/50 flex items-center justify-between px-1.5"
                                     style={{ left: `${left}%`, width: `${width}%` }}
                                     title={`${minutesToTime(g.start)}–${minutesToTime(g.end)}`}
-                                  />
+                                  >
+                                    <span className="text-[10px] font-mono font-bold text-red-800">{minutesToTime(g.start)}</span>
+                                    <span className="text-[10px] font-mono font-bold text-red-800">{minutesToTime(g.end)}</span>
+                                  </div>
                                 )
                               })}
                             </div>
-                            <span className="shrink-0 text-[10px] text-red-600">
-                              {gaps.map((g, i) => <span key={i}>{i > 0 && ", "}{minutesToTime(g.start)}–{minutesToTime(g.end)}</span>)}
-                            </span>
                           </div>
                         )}
                       </>
                     ) : (
                       <div className="flex items-center gap-2">
                         <span className="w-[80px] shrink-0 text-[11px] font-medium text-red-600">Sin cubrir</span>
-                        <div className="relative h-4 flex-1 rounded bg-red-300/50 overflow-hidden" />
-                        <span className="shrink-0 text-[10px] text-red-600">{groupTimes.startTime}–{groupTimes.endTime}</span>
+                        <div className="relative h-7 flex-1 rounded bg-red-300/50 overflow-hidden flex items-center justify-between px-1.5">
+                          <span className="text-[10px] font-mono font-bold text-red-800">{groupTimes.startTime}</span>
+                          <span className="text-[10px] font-mono font-bold text-red-800">{groupTimes.endTime}</span>
+                        </div>
                       </div>
                     )}
                   </div>

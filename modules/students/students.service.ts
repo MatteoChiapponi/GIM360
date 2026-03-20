@@ -32,6 +32,7 @@ export async function createStudent(data: CreateStudentInput) {
     data: {
       ...data,
       birthDate: data.birthDate ? new Date(data.birthDate) : undefined,
+      trialEndsAt: data.trialEndsAt ? new Date(data.trialEndsAt) : undefined,
     },
   })
 }
@@ -42,12 +43,21 @@ export async function updateStudent(id: string, data: UpdateStudentInput) {
     data: {
       ...data,
       birthDate: data.birthDate ? new Date(data.birthDate) : undefined,
+      trialEndsAt: data.trialEndsAt ? new Date(data.trialEndsAt) : undefined,
     },
   })
 }
 
 export async function deactivateStudent(id: string) {
-  return db.student.update({ where: { id }, data: { leftAt: new Date() } })
+  return db.student.update({ where: { id }, data: { status: "INACTIVO", leftAt: new Date() } })
+}
+
+export async function activateStudent(id: string) {
+  return db.student.update({ where: { id }, data: { status: "ACTIVO", leftAt: null } })
+}
+
+export async function startTrial(id: string, trialEndsAt: Date) {
+  return db.student.update({ where: { id }, data: { status: "PRUEBA", trialEndsAt } })
 }
 
 export async function deleteStudent(id: string) {

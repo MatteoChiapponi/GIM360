@@ -77,7 +77,7 @@ export async function getGroupMetrics(input: MetricsQueryInput): Promise<GroupMe
       where: { gymId: input.gymId },
       include: {
         students: {
-          where: { student: { leftAt: null } },
+          where: { student: { status: { in: ["ACTIVO", "PRUEBA"] } } },
           include: {
             student: { select: { id: true } },
           },

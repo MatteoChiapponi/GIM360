@@ -56,6 +56,7 @@ async function main() {
   // ── Cleanup (idempotent re-runs) ───────────────────────────────────────────
 
   await db.payment.deleteMany({ where: { gymId: gym.id } })
+  await db.cashClosing.deleteMany({ where: { gymId: gym.id } })
   await db.studentGroup.deleteMany({ where: { student: { gymId: gym.id } } })
   await db.trainerGroup.deleteMany({ where: { trainer: { gymId: gym.id } } })
   await db.schedule.deleteMany({ where: { group: { gymId: gym.id } } })
@@ -455,6 +456,7 @@ async function main() {
       phone: "1145678901",
       joinedAt: date(2025, 6, 1),
       leftAt: date(2026, 1, 31),
+      status: "INACTIVO" as const,
       dueDay: 1,
       groups: [groupBeginners.id],
     },
@@ -485,7 +487,7 @@ async function main() {
   // February: mix of paid and pending
   // March: realistic current state (some paid, some pending, some expired)
 
-  const activeStudents = students.filter((s) => !s.leftAt)
+  const activeStudents = students.filter((s) => s.status !== "INACTIVO")
 
   // Compute each student's total monthly fee (sum of all enrolled groups)
   const monthlyAmounts: Record<string, number> = {}
@@ -502,60 +504,60 @@ async function main() {
 
   // January 2026 — closed month, almost all paid
   const januaryPayments = [
-    { student: "Ana",       status: "PAID",    paidAt: date(2026, 1, 5)  },
-    { student: "Carlos",    status: "PAID",    paidAt: date(2026, 1, 14) },
-    { student: "Martina",   status: "PAID",    paidAt: date(2026, 1, 16) },
-    { student: "Sofía",     status: "PAID",    paidAt: date(2026, 1, 3)  },
-    { student: "Tomás",     status: "PAID",    paidAt: date(2026, 1, 22) },
-    { student: "Lautaro",   status: "PAID",    paidAt: date(2026, 1, 5)  },
-    { student: "Valentina", status: "PAID",    paidAt: date(2026, 1, 16) },
-    { student: "Joaquín",   status: "PAID",    paidAt: date(2026, 1, 12) },
-    { student: "Milagros",  status: "PAID",    paidAt: date(2026, 1, 3)  },
-    { student: "Agustina",  status: "PAID",    paidAt: date(2026, 1, 5)  },
-    { student: "Florencia", status: "PAID",    paidAt: date(2026, 1, 12) },
-    { student: "Lucas",     status: "EXPIRED", paidAt: null              },
-    { student: "Camila",    status: "PAID",    paidAt: date(2026, 1, 10) },
-    { student: "Emilia",    status: "PAID",    paidAt: date(2026, 1, 5)  },
+    { student: "Ana",       status: "PAID",    paidAt: date(2026, 1, 5),  paymentMethod: "EFECTIVO"       as const },
+    { student: "Carlos",    status: "PAID",    paidAt: date(2026, 1, 14), paymentMethod: "TRANSFERENCIA"  as const },
+    { student: "Martina",   status: "PAID",    paidAt: date(2026, 1, 16), paymentMethod: "EFECTIVO"       as const },
+    { student: "Sofía",     status: "PAID",    paidAt: date(2026, 1, 3),  paymentMethod: "TARJETA"        as const },
+    { student: "Tomás",     status: "PAID",    paidAt: date(2026, 1, 22), paymentMethod: "EFECTIVO"       as const },
+    { student: "Lautaro",   status: "PAID",    paidAt: date(2026, 1, 5),  paymentMethod: "TRANSFERENCIA"  as const },
+    { student: "Valentina", status: "PAID",    paidAt: date(2026, 1, 16), paymentMethod: "EFECTIVO"       as const },
+    { student: "Joaquín",   status: "PAID",    paidAt: date(2026, 1, 12), paymentMethod: "TARJETA"        as const },
+    { student: "Milagros",  status: "PAID",    paidAt: date(2026, 1, 3),  paymentMethod: "EFECTIVO"       as const },
+    { student: "Agustina",  status: "PAID",    paidAt: date(2026, 1, 5),  paymentMethod: "TRANSFERENCIA"  as const },
+    { student: "Florencia", status: "PAID",    paidAt: date(2026, 1, 12), paymentMethod: "TARJETA"        as const },
+    { student: "Lucas",     status: "EXPIRED", paidAt: null,              paymentMethod: null              },
+    { student: "Camila",    status: "PAID",    paidAt: date(2026, 1, 10), paymentMethod: "EFECTIVO"       as const },
+    { student: "Emilia",    status: "PAID",    paidAt: date(2026, 1, 5),  paymentMethod: "TRANSFERENCIA"  as const },
   ] as const
 
   // February 2026 — past month, mix of paid and pending
   const februaryPayments = [
-    { student: "Ana",       status: "PAID",    paidAt: date(2026, 2, 6)  },
-    { student: "Carlos",    status: "PAID",    paidAt: date(2026, 2, 14) },
-    { student: "Martina",   status: "PAID",    paidAt: date(2026, 2, 16) },
-    { student: "Sofía",     status: "PAID",    paidAt: date(2026, 2, 2)  },
-    { student: "Tomás",     status: "PAID",    paidAt: date(2026, 2, 21) },
-    { student: "Lautaro",   status: "PENDING", paidAt: null              },
-    { student: "Valentina", status: "PENDING", paidAt: null              },
-    { student: "Joaquín",   status: "PAID",    paidAt: date(2026, 2, 11) },
-    { student: "Milagros",  status: "PAID",    paidAt: date(2026, 2, 3)  },
-    { student: "Agustina",  status: "PAID",    paidAt: date(2026, 2, 6)  },
-    { student: "Florencia", status: "PENDING", paidAt: null              },
-    { student: "Isabella",  status: "PAID",    paidAt: date(2026, 2, 2)  },
-    { student: "Mateo",     status: "PAID",    paidAt: date(2026, 2, 3)  },
-    { student: "Lucas",     status: "PAID",    paidAt: date(2026, 2, 5)  },
-    { student: "Camila",    status: "PENDING", paidAt: null              },
-    { student: "Emilia",    status: "PAID",    paidAt: date(2026, 2, 4)  },
+    { student: "Ana",       status: "PAID",    paidAt: date(2026, 2, 6),  paymentMethod: "TRANSFERENCIA"  as const },
+    { student: "Carlos",    status: "PAID",    paidAt: date(2026, 2, 14), paymentMethod: "EFECTIVO"       as const },
+    { student: "Martina",   status: "PAID",    paidAt: date(2026, 2, 16), paymentMethod: "TARJETA"        as const },
+    { student: "Sofía",     status: "PAID",    paidAt: date(2026, 2, 2),  paymentMethod: "EFECTIVO"       as const },
+    { student: "Tomás",     status: "PAID",    paidAt: date(2026, 2, 21), paymentMethod: "TRANSFERENCIA"  as const },
+    { student: "Lautaro",   status: "PENDING", paidAt: null,              paymentMethod: null              },
+    { student: "Valentina", status: "PENDING", paidAt: null,              paymentMethod: null              },
+    { student: "Joaquín",   status: "PAID",    paidAt: date(2026, 2, 11), paymentMethod: "EFECTIVO"       as const },
+    { student: "Milagros",  status: "PAID",    paidAt: date(2026, 2, 3),  paymentMethod: "TARJETA"        as const },
+    { student: "Agustina",  status: "PAID",    paidAt: date(2026, 2, 6),  paymentMethod: "EFECTIVO"       as const },
+    { student: "Florencia", status: "PENDING", paidAt: null,              paymentMethod: null              },
+    { student: "Isabella",  status: "PAID",    paidAt: date(2026, 2, 2),  paymentMethod: "EFECTIVO"       as const },
+    { student: "Mateo",     status: "PAID",    paidAt: date(2026, 2, 3),  paymentMethod: "TRANSFERENCIA"  as const },
+    { student: "Lucas",     status: "PAID",    paidAt: date(2026, 2, 5),  paymentMethod: "TARJETA"        as const },
+    { student: "Camila",    status: "PENDING", paidAt: null,              paymentMethod: null              },
+    { student: "Emilia",    status: "PAID",    paidAt: date(2026, 2, 4),  paymentMethod: "EFECTIVO"       as const },
   ] as const
 
   // March 2026 — current month, realistic in-progress state
   const marchPayments = [
-    { student: "Ana",       status: "PAID",    paidAt: date(2026, 3, 5)  },
-    { student: "Carlos",    status: "PENDING", paidAt: null              },
-    { student: "Martina",   status: "PAID",    paidAt: date(2026, 3, 15) },
-    { student: "Sofía",     status: "PAID",    paidAt: date(2026, 3, 2)  },
-    { student: "Tomás",     status: "PENDING", paidAt: null              },
-    { student: "Lautaro",   status: "PAID",    paidAt: date(2026, 3, 3)  },
-    { student: "Valentina", status: "PAID",    paidAt: date(2026, 3, 15) },
-    { student: "Joaquín",   status: "PENDING", paidAt: null              },
-    { student: "Milagros",  status: "PAID",    paidAt: date(2026, 3, 2)  },
-    { student: "Agustina",  status: "EXPIRED", paidAt: null              },
-    { student: "Florencia", status: "PAID",    paidAt: date(2026, 3, 11) },
-    { student: "Isabella",  status: "PAID",    paidAt: date(2026, 3, 2)  },
-    { student: "Mateo",     status: "PENDING", paidAt: null              },
-    { student: "Lucas",     status: "PAID",    paidAt: date(2026, 3, 4)  },
-    { student: "Camila",    status: "EXPIRED", paidAt: null              },
-    { student: "Emilia",    status: "PAID",    paidAt: date(2026, 3, 3)  },
+    { student: "Ana",       status: "PAID",    paidAt: date(2026, 3, 5),  paymentMethod: "EFECTIVO"       as const },
+    { student: "Carlos",    status: "PENDING", paidAt: null,              paymentMethod: null              },
+    { student: "Martina",   status: "PAID",    paidAt: date(2026, 3, 15), paymentMethod: "TRANSFERENCIA"  as const },
+    { student: "Sofía",     status: "PAID",    paidAt: date(2026, 3, 2),  paymentMethod: "TARJETA"        as const },
+    { student: "Tomás",     status: "PENDING", paidAt: null,              paymentMethod: null              },
+    { student: "Lautaro",   status: "PAID",    paidAt: date(2026, 3, 3),  paymentMethod: "EFECTIVO"       as const },
+    { student: "Valentina", status: "PAID",    paidAt: date(2026, 3, 15), paymentMethod: "TRANSFERENCIA"  as const },
+    { student: "Joaquín",   status: "PENDING", paidAt: null,              paymentMethod: null              },
+    { student: "Milagros",  status: "PAID",    paidAt: date(2026, 3, 2),  paymentMethod: "EFECTIVO"       as const },
+    { student: "Agustina",  status: "EXPIRED", paidAt: null,              paymentMethod: null              },
+    { student: "Florencia", status: "PAID",    paidAt: date(2026, 3, 11), paymentMethod: "TARJETA"        as const },
+    { student: "Isabella",  status: "PAID",    paidAt: date(2026, 3, 2),  paymentMethod: "EFECTIVO"       as const },
+    { student: "Mateo",     status: "PENDING", paidAt: null,              paymentMethod: null              },
+    { student: "Lucas",     status: "PAID",    paidAt: date(2026, 3, 4),  paymentMethod: "TRANSFERENCIA"  as const },
+    { student: "Camila",    status: "EXPIRED", paidAt: null,              paymentMethod: null              },
+    { student: "Emilia",    status: "PAID",    paidAt: date(2026, 3, 3),  paymentMethod: "EFECTIVO"       as const },
   ] as const
 
   for (const [period, entries] of [
@@ -573,6 +575,7 @@ async function main() {
           amount: monthlyAmounts[student.id],
           status: entry.status,
           paidAt: entry.paidAt ?? null,
+          paymentMethod: entry.paymentMethod,
         },
       })
     }

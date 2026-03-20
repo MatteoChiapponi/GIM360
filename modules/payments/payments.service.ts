@@ -1,5 +1,8 @@
 import { db } from "@/lib/db"
+import type { PaymentMethod } from "@/app/generated/prisma/client"
 import type { UpdatePaymentInput } from "./payments.schema"
+
+type UpdatePaymentData = Omit<UpdatePaymentInput, "paymentMethod"> & { paymentMethod?: PaymentMethod | null }
 
 /** Parses "YYYY-MM" into the first-day-of-month Date (UTC) */
 function parsePeriod(period: string): Date {
@@ -27,7 +30,7 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
   const students = await db.student.findMany({
     where: {
       gymId,
-      leftAt: null,
+      status: { in: ["ACTIVO", "PRUEBA"] },
       groups: { some: {} },
     },
     include: {
@@ -106,8 +109,8 @@ export async function getPaymentsByStudent(studentId: string) {
   })
 }
 
-/** Updates a payment (status, paidAt, notes, amount) */
-export async function updatePayment(id: string, data: UpdatePaymentInput) {
+/** Updates a payment (status, paidAt, notes, amount, paymentMethod) */
+export async function updatePayment(id: string, data: UpdatePaymentData) {
   return db.payment.update({
     where: { id },
     data,

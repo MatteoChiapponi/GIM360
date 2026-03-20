@@ -1,9 +1,10 @@
+import type { ReactNode } from "react"
 import { Button } from "./Button"
 
 interface ConfirmDialogProps {
   open: boolean
   title: string
-  message: string
+  message: ReactNode
   confirmLabel?: string
   confirmVariant?: "primary" | "danger"
   onConfirm: () => void
@@ -36,7 +37,7 @@ export function ConfirmDialog({
       <div className="relative w-full max-w-sm rounded-2xl border border-[#E5E4E0] bg-white px-6 py-6 shadow-xl space-y-4">
         <div className="space-y-1.5">
           <p className="text-[15px] font-semibold text-[#111110]">{title}</p>
-          <p className="text-sm text-[#68685F] leading-relaxed">{message}</p>
+          <div className="text-sm text-[#68685F] leading-relaxed">{message}</div>
         </div>
         <div className="flex items-center justify-end gap-3 pt-1">
           <Button variant="secondary" onClick={onCancel}>

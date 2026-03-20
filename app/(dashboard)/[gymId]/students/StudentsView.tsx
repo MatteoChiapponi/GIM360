@@ -18,7 +18,20 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type StudentStatus = "ACTIVO" | "INACTIVO" | "PRUEBA"
 type StudentFileType = "FICHA" | "APTO_MEDICO"
+type PaymentStatus = "PENDING" | "PAID" | "EXPIRED"
+type PaymentMethod = "EFECTIVO" | "TRANSFERENCIA" | "TARJETA"
+
+type StudentPayment = {
+  id: string
+  period: string
+  amount: string
+  status: PaymentStatus
+  paymentMethod: PaymentMethod | null
+  paidAt: string | null
+  verified: boolean
+}
 
 type StudentFile = {
   id: string
@@ -34,6 +47,8 @@ type Student = {
   id: string; firstName: string; lastName: string
   phone: string | null
   leftAt: string | null; dueDay: number
+  status: StudentStatus
+  trialEndsAt: string | null
   files: { fileType: StudentFileType }[]
 }
 
@@ -51,6 +66,8 @@ type StudentDetail = {
   phone: string | null; emergencyContact: string | null; emergencyPhone: string | null
   birthDate: string | null; nationalId: string | null
   joinedAt: string; leftAt: string | null; dueDay: number
+  status: StudentStatus
+  trialEndsAt: string | null
   groups: EnrolledGroup[]
 }
 
@@ -82,10 +99,18 @@ function fmtCurrency(value: string | number) {
 type SimpleGroup = { id: string; name: string }
 
 type FilterTab = "ACTIVOS" | "TODOS"
-type NewForm = { firstName: string; lastName: string; dueDay: string; phone: string; groupId: string; fichaFile: File | null; aptoFile: File | null }
+type NewForm = {
+  firstName: string; lastName: string; dueDay: string; phone: string; groupId: string
+  fichaFile: File | null; aptoFile: File | null
+  isTrial: boolean; trialEndsAt: string
+}
 type EditForm = { firstName: string; lastName: string; dueDay: string; phone: string }
 
-const EMPTY_FORM: NewForm = { firstName: "", lastName: "", dueDay: "", phone: "", groupId: "", fichaFile: null, aptoFile: null }
+const EMPTY_FORM: NewForm = {
+  firstName: "", lastName: "", dueDay: "", phone: "", groupId: "",
+  fichaFile: null, aptoFile: null,
+  isTrial: false, trialEndsAt: "",
+}
 const EMPTY_EDIT: EditForm = { firstName: "", lastName: "", dueDay: "", phone: "" }
 
 export default function StudentsView({ gymId }: { gymId: string }) {
@@ -127,6 +152,13 @@ export default function StudentsView({ gymId }: { gymId: string }) {
   // Deactivate confirm
   const [confirmId, setConfirmId] = useState<string | null>(null)
 
+  // Reactivate
+  const [reactivating, setReactivating] = useState(false)
+
+  // Payment history
+  const [studentPayments, setStudentPayments] = useState<StudentPayment[]>([])
+  const [paymentsLoading, setPaymentsLoading] = useState(false)
+
   // Files
   const [files, setFiles] = useState<StudentFile[]>([])
   const [filesLoading, setFilesLoading] = useState(false)
@@ -135,9 +167,16 @@ export default function StudentsView({ gymId }: { gymId: string }) {
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null)
   const [confirmFileId, setConfirmFileId] = useState<string | null>(null)
 
-  const activos = students.filter((s) => s.leftAt === null)
-  const bajas = students.filter((s) => s.leftAt !== null)
-  const base = filter === "ACTIVOS" ? activos : students
+  // ─── Derived counts ────────────────────────────────────────────────────────
+  const countActivo = students.filter((s) => s.status === "ACTIVO").length
+  const countPrueba = students.filter((s) => s.status === "PRUEBA").length
+  const countInactivo = students.filter((s) => s.status === "INACTIVO").length
+
+  // ─── Filtering & sorting ───────────────────────────────────────────────────
+  const base = filter === "ACTIVOS"
+    ? students.filter((s) => s.status !== "INACTIVO")
+    : students
+
   const displayed = base
     .filter((s) =>
       `${s.firstName} ${s.lastName}`.toLowerCase().includes(search.toLowerCase()) ||
@@ -158,6 +197,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
     setSelectedDetail(null)
     setFiles([])
     setFilesError(null)
+    setStudentPayments([])
     setDetailLoading(true)
     try {
       const res = await fetch(`/api/students/${s.id}?gymId=${gymId}`)
@@ -166,6 +206,11 @@ export default function StudentsView({ gymId }: { gymId: string }) {
       setDetailLoading(false)
     }
     await loadFiles(s.id)
+    setPaymentsLoading(true)
+    fetch(`/api/payments?gymId=${gymId}&studentId=${s.id}`)
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setStudentPayments(data) })
+      .finally(() => setPaymentsLoading(false))
   }
 
   function closeDetail() {
@@ -271,6 +316,23 @@ export default function StudentsView({ gymId }: { gymId: string }) {
     if (res.ok) { closeDetail(); await refetch() }
   }
 
+  async function handleReactivate() {
+    if (!selectedDetail) return
+    setReactivating(true)
+    const res = await fetch(`/api/students/${selectedDetail.id}?gymId=${gymId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "ACTIVO" }),
+    })
+    if (res.ok) {
+      const [updated] = await Promise.all([
+        fetch(`/api/students/${selectedDetail.id}?gymId=${gymId}`).then((r) => r.json()),
+        refetch(),
+      ])
+      setSelectedDetail(updated)
+    }
+    setReactivating(false)
+  }
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     setFormError(null)
@@ -279,10 +341,17 @@ export default function StudentsView({ gymId }: { gymId: string }) {
     if (!form.dueDay) { setFormError("El día de cobro es obligatorio."); return }
     const day = Number(form.dueDay)
     if (isNaN(day) || day < 1 || day > 31) { setFormError("El día de cobro debe ser entre 1 y 31."); return }
+    if (form.isTrial && !form.trialEndsAt) { setFormError("Ingresá la fecha de fin del período de prueba."); return }
 
     setSubmitting(true)
-    const body: Record<string, unknown> = { gymId, firstName: form.firstName.trim(), lastName: form.lastName.trim(), dueDay: day }
+    const body: Record<string, unknown> = {
+      gymId, firstName: form.firstName.trim(), lastName: form.lastName.trim(), dueDay: day,
+    }
     if (form.phone.trim()) body.phone = form.phone.trim()
+    if (form.isTrial) {
+      body.status = "PRUEBA"
+      body.trialEndsAt = new Date(form.trialEndsAt).toISOString()
+    }
 
     const res = await fetch("/api/students", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -332,6 +401,26 @@ export default function StudentsView({ gymId }: { gymId: string }) {
     setSubmitting(false)
   }
 
+  // ─── Status helpers ────────────────────────────────────────────────────────
+
+  function statusLabel(status: StudentStatus) {
+    if (status === "ACTIVO") return "Activo"
+    if (status === "PRUEBA") return "Prueba"
+    return "Baja"
+  }
+
+  function statusDotColor(status: StudentStatus) {
+    if (status === "ACTIVO") return "bg-emerald-500"
+    if (status === "PRUEBA") return "bg-amber-500"
+    return "bg-red-500"
+  }
+
+  function statusTextColor(status: StudentStatus) {
+    if (status === "ACTIVO") return "text-emerald-700"
+    if (status === "PRUEBA") return "text-amber-700"
+    return "text-red-700"
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -340,9 +429,10 @@ export default function StudentsView({ gymId }: { gymId: string }) {
         action={<Button onClick={() => { setShowForm(true); setFormError(null) }}>+ Nuevo alumno</Button>}
       />
 
-      <div className="grid grid-cols-2 gap-3">
-        <StatCard label="Activos" value={activos.length} valueColor="text-emerald-700" />
-        <StatCard label="Bajas" value={bajas.length} valueColor="text-red-700" />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <StatCard label="Activos" value={countActivo} valueColor="text-emerald-700" />
+        <StatCard label="Prueba" value={countPrueba} valueColor="text-amber-700" />
+        <StatCard label="Bajas" value={countInactivo} valueColor="text-red-700" />
       </div>
 
       <Tabs
@@ -390,6 +480,34 @@ export default function StudentsView({ gymId }: { gymId: string }) {
             {gymGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
           </Select>
         </FormField>
+
+        {/* Trial period toggle — spans both columns */}
+        <div className="col-span-full border-t border-[#F0EFEB] pt-4 space-y-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Estado</p>
+          <label className="flex items-center gap-3 cursor-pointer select-none">
+            <div
+              role="checkbox"
+              aria-checked={form.isTrial}
+              tabIndex={0}
+              onClick={() => setForm((f) => ({ ...f, isTrial: !f.isTrial, trialEndsAt: "" }))}
+              onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") setForm((f) => ({ ...f, isTrial: !f.isTrial, trialEndsAt: "" })) }}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors focus:outline-none focus:ring-2 focus:ring-[#111110] focus:ring-offset-1 ${form.isTrial ? "bg-amber-500 border-amber-500" : "bg-[#E5E4E0] border-[#E5E4E0]"}`}
+            >
+              <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${form.isTrial ? "translate-x-4" : "translate-x-0.5"}`} />
+            </div>
+            <span className="text-sm text-[#111110]">Período de prueba</span>
+          </label>
+          {form.isTrial && (
+            <FormField label="Fin del período de prueba" required>
+              <input
+                type="date"
+                value={form.trialEndsAt}
+                onChange={(e) => setForm((f) => ({ ...f, trialEndsAt: e.target.value }))}
+                className="w-full rounded-lg border border-[#E5E4E0] bg-white px-4 py-3 text-sm text-[#111110] focus:border-[#111110] focus:outline-none transition-colors"
+              />
+            </FormField>
+          )}
+        </div>
 
         {/* File upload section — spans both columns */}
         <div className="col-span-full border-t border-[#F0EFEB] pt-4 space-y-3">
@@ -443,9 +561,23 @@ export default function StudentsView({ gymId }: { gymId: string }) {
       <DataTable
         columns={[
           { key: "name", header: "Nombre", render: (s) => (
-            <div className="flex items-center gap-2">
-              <span className={`font-medium ${s.leftAt === null ? "text-[#111110]" : "text-[#A5A49D]"}`}>{s.firstName} {s.lastName}</span>
-              {s.leftAt !== null && <span className="text-[10px] uppercase tracking-wider text-[#A5A49D] bg-[#F7F6F3] px-1.5 py-0.5 rounded">Baja</span>}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`font-medium ${s.status !== "INACTIVO" ? "text-[#111110]" : "text-[#A5A49D]"}`}>
+                {s.firstName} {s.lastName}
+              </span>
+              {s.status === "PRUEBA" && (
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
+                  Prueba
+                </span>
+              )}
+              {s.status === "INACTIVO" && (
+                <span className="text-[10px] uppercase tracking-wider text-[#A5A49D] bg-[#F7F6F3] px-1.5 py-0.5 rounded">
+                  Baja
+                </span>
+              )}
+              {s.status === "PRUEBA" && s.trialEndsAt && (
+                <span className="text-[10px] text-[#A5A49D]">hasta {fmtDate(s.trialEndsAt)}</span>
+              )}
             </div>
           )},
           { key: "phone", header: "Tel.", render: (s) => <span className="text-[#68685F]">{s.phone ?? <span className="text-[#A5A49D]">—</span>}</span> },
@@ -485,7 +617,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
                   <div>
                     <h2 className="text-lg font-semibold text-[#111110]">{selectedDetail.firstName} {selectedDetail.lastName}</h2>
                     <p className="text-xs text-[#A5A49D] mt-0.5">
-                      {selectedDetail.leftAt === null ? "Activo" : "Baja"} · {selectedDetail.groups.length} grupo{selectedDetail.groups.length !== 1 ? "s" : ""}
+                      {statusLabel(selectedDetail.status)} · {selectedDetail.groups.length} grupo{selectedDetail.groups.length !== 1 ? "s" : ""}
                     </p>
                   </div>
                   <button onClick={closeDetail} className="cursor-pointer text-[#A5A49D] hover:text-[#111110] transition-colors p-1 shrink-0">
@@ -495,10 +627,19 @@ export default function StudentsView({ gymId }: { gymId: string }) {
 
                 <div className="px-6 py-5 space-y-6">
                   {/* ── Acciones ─────────────────────────────────────────── */}
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <Button variant="secondary" onClick={startEdit}>Editar</Button>
-                    {selectedDetail.leftAt === null && (
+                    {selectedDetail.status !== "INACTIVO" && (
                       <Button variant="danger" onClick={() => setConfirmId(selectedDetail.id)}>Dar de baja</Button>
+                    )}
+                    {selectedDetail.status === "INACTIVO" && (
+                      <Button
+                        variant="primary"
+                        onClick={handleReactivate}
+                        disabled={reactivating}
+                      >
+                        {reactivating ? "Reactivando…" : "Reactivar"}
+                      </Button>
                     )}
                   </div>
 
@@ -509,11 +650,22 @@ export default function StudentsView({ gymId }: { gymId: string }) {
                       <div className="rounded-lg border border-[#E5E4E0] bg-[#FAFAF9] px-3 py-2.5">
                         <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#A5A49D]">Estado</p>
                         <div className="mt-1.5">
-                          {selectedDetail.leftAt === null
-                            ? <StatusDot dotColor="bg-emerald-500" textColor="text-emerald-700" label="Activo" />
-                            : <StatusDot dotColor="bg-red-500" textColor="text-red-700" label="Baja" />
-                          }
+                          <StatusDot
+                            dotColor={statusDotColor(selectedDetail.status)}
+                            textColor={statusTextColor(selectedDetail.status)}
+                            label={statusLabel(selectedDetail.status)}
+                          />
                         </div>
+                        {selectedDetail.status === "PRUEBA" && selectedDetail.trialEndsAt && (
+                          <p className="mt-1 text-xs text-amber-700">
+                            Prueba hasta {fmtDate(selectedDetail.trialEndsAt)}
+                          </p>
+                        )}
+                        {selectedDetail.status === "INACTIVO" && selectedDetail.leftAt && (
+                          <p className="mt-1 text-xs text-[#A5A49D]">
+                            Baja desde {fmtDate(selectedDetail.leftAt)}
+                          </p>
+                        )}
                       </div>
 
                       <div className="grid grid-cols-2 gap-2">
@@ -600,6 +752,54 @@ export default function StudentsView({ gymId }: { gymId: string }) {
                             </p>
                           </div>
                         ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── Cuotas ───────────────────────────────────────────── */}
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A5A49D] mb-3">Historial de cuotas</h3>
+                    {paymentsLoading ? (
+                      <div className="space-y-2">
+                        {[1, 2, 3].map((i) => <div key={i} className="h-10 animate-pulse rounded-lg bg-[#F0EFEB]" />)}
+                      </div>
+                    ) : studentPayments.length === 0 ? (
+                      <p className="text-sm text-[#A5A49D]">No hay cuotas registradas.</p>
+                    ) : (
+                      <div className="rounded-lg border border-[#E5E4E0] overflow-hidden">
+                        {studentPayments.map((p, i) => {
+                          const [year, month] = p.period.split("T")[0].split("-")
+                          const periodLabel = new Date(Number(year), Number(month) - 1, 1)
+                            .toLocaleDateString("es-AR", { month: "long", year: "numeric" })
+                          const statusColors: Record<PaymentStatus, string> = {
+                            PAID: "text-emerald-700", PENDING: "text-amber-700", EXPIRED: "text-red-700",
+                          }
+                          const statusLabels: Record<PaymentStatus, string> = {
+                            PAID: "Pagado", PENDING: "Pendiente", EXPIRED: "Vencido",
+                          }
+                          const methodLabels: Record<PaymentMethod, string> = {
+                            EFECTIVO: "Efectivo", TRANSFERENCIA: "Transferencia", TARJETA: "Tarjeta",
+                          }
+                          return (
+                            <div
+                              key={p.id}
+                              className={`flex items-center justify-between gap-3 px-3 py-2.5 bg-[#FAFAF9] text-sm ${i > 0 ? "border-t border-[#F0EFEB]" : ""}`}
+                            >
+                              <div className="min-w-0">
+                                <p className="font-medium text-[#111110] capitalize">{periodLabel}</p>
+                                <p className="text-xs text-[#A5A49D]">
+                                  {p.paymentMethod ? methodLabels[p.paymentMethod] : "—"}
+                                  {p.paidAt ? ` · ${new Date(p.paidAt).toLocaleDateString("es-AR")}` : ""}
+                                  {p.verified ? " · ✓" : ""}
+                                </p>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className="font-mono font-semibold text-[#111110]">${Number(p.amount).toLocaleString("es-AR")}</p>
+                                <p className={`text-xs font-medium ${statusColors[p.status]}`}>{statusLabels[p.status]}</p>
+                              </div>
+                            </div>
+                          )
+                        })}
                       </div>
                     )}
                   </div>

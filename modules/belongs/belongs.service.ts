@@ -59,3 +59,9 @@ export async function gymIsActive(gymId: string): Promise<boolean> {
   const gym = await db.gym.findFirst({ where: { id: gymId, status: "ACTIVE" } })
   return !!gym
 }
+
+/** Verifica si el cierre de caja pertenece al gimnasio */
+export async function cashClosingBelongsToGym(closingId: string, gymId: string): Promise<boolean> {
+  const closing = await db.cashClosing.findFirst({ where: { id: closingId, gymId } })
+  return !!closing
+}

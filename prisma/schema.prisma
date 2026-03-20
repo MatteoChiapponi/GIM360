@@ -42,6 +42,18 @@ enum StudentFileType {
   APTO_MEDICO
 }
 
+enum StudentStatus {
+  ACTIVO
+  INACTIVO
+  PRUEBA
+}
+
+enum PaymentMethod {
+  EFECTIVO
+  TRANSFERENCIA
+  TARJETA
+}
+
 // ─── Modelos ─────────────────────────────────────────────────────────────────
 
 model User {
@@ -81,6 +93,7 @@ model Gym {
   groups        Group[]
   fixedExpenses FixedExpense[]
   payments      Payment[]
+  cashClosings  CashClosing[]
   studentFiles  StudentFile[]
 
   @@index([ownerId])
@@ -125,6 +138,8 @@ model Student {
   phone                String?
   joinedAt             DateTime         @default(now())
   leftAt               DateTime?
+  status               StudentStatus    @default(ACTIVO)
+  trialEndsAt          DateTime?
   dueDay               Int              @default(1)
   createdAt            DateTime         @default(now())
 
@@ -206,20 +221,25 @@ model Schedule {
 }
 
 model Payment {
-  id        String        @id @default(cuid())
-  gymId     String
-  gym       Gym           @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  studentId String
-  student   Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  period    DateTime      // first day of the month: 2026-04-01T00:00:00Z
-  amount    Decimal       @db.Decimal(10, 2)
-  status    PaymentStatus @default(PENDING)
-  paidAt    DateTime?
-  notes     String?
-  createdAt DateTime      @default(now())
+  id            String         @id @default(cuid())
+  gymId         String
+  gym           Gym            @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  studentId     String
+  student       Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  period        DateTime       // first day of the month: 2026-04-01T00:00:00Z
+  amount        Decimal        @db.Decimal(10, 2)
+  status        PaymentStatus  @default(PENDING)
+  paymentMethod PaymentMethod?
+  paidAt        DateTime?
+  verified      Boolean        @default(false)
+  cashClosingId String?
+  cashClosing   CashClosing?   @relation(fields: [cashClosingId], references: [id])
+  notes         String?
+  createdAt     DateTime       @default(now())
 
   @@unique([studentId, period])
   @@index([gymId, period, status])
+  @@index([cashClosingId])
 }
 
 model StudentFile {
@@ -236,5 +256,28 @@ model StudentFile {
   uploadedAt  DateTime        @default(now())
 
   @@index([studentId])
+  @@index([gymId])
+}
+
+model CashClosing {
+  id                 String   @id @default(cuid())
+  gymId              String
+  gym                Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  fromDate           DateTime // paidAt of earliest payment
+  toDate             DateTime // paidAt of latest payment
+  closedAt           DateTime @default(now())
+  totalCollected     Decimal  @db.Decimal(10, 2)
+  paidCount          Int
+  efectivoCount      Int      @default(0)
+  efectivoTotal      Decimal  @db.Decimal(10, 2) @default(0)
+  transferenciaCount Int      @default(0)
+  transferenciaTotal Decimal  @db.Decimal(10, 2) @default(0)
+  tarjetaCount       Int      @default(0)
+  tarjetaTotal       Decimal  @db.Decimal(10, 2) @default(0)
+  notes              String?
+  createdAt          DateTime @default(now())
+
+  payments Payment[]
+
   @@index([gymId])
 }

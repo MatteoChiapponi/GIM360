@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { StudentStatus } from "@/app/generated/prisma/client"
 
 export const createStudentSchema = z.object({
   gymId: z.string().min(1),
@@ -10,6 +11,8 @@ export const createStudentSchema = z.object({
   phone: z.string().optional(),
   emergencyPhone: z.string().optional(),
   emergencyContact: z.string().optional(),
+  status: z.nativeEnum(StudentStatus).optional(),
+  trialEndsAt: z.string().datetime().optional(),
 })
 
 export const updateStudentSchema = createStudentSchema.omit({ gymId: true }).partial()

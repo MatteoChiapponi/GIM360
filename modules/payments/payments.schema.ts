@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { PaymentStatus } from "@/app/generated/prisma/client"
+import { PaymentStatus, PaymentMethod } from "@/app/generated/prisma/client"
 
 export const generatePaymentsSchema = z.object({
   gymId: z.string().cuid(),
@@ -8,6 +8,7 @@ export const generatePaymentsSchema = z.object({
 
 export const updatePaymentSchema = z.object({
   status: z.nativeEnum(PaymentStatus).optional(),
+  paymentMethod: z.nativeEnum(PaymentMethod).optional(),
   paidAt: z.string().datetime().optional(),
   notes: z.string().optional(),
   amount: z.number().positive().optional(),
