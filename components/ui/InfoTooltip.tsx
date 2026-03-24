@@ -3,20 +3,42 @@
 import { useState, useEffect, useLayoutEffect, useRef } from "react"
 import { createPortal } from "react-dom"
 
+const TOOLTIP_WIDTH = 256
+const PADDING = 10
+
+type Pos = { top: number; left: number; above: boolean; ready: boolean }
+
 export function InfoTooltip({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
   const [hover, setHover] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const [pos, setPos] = useState<Pos | null>(null)
 
   const visible = open || hover
 
+  // Pass 1: compute horizontal position, render invisible below trigger
   useLayoutEffect(() => {
     if (!visible || !triggerRef.current) { setPos(null); return }
     const rect = triggerRef.current.getBoundingClientRect()
-    setPos({ top: rect.bottom + 8, left: rect.left + rect.width / 2 })
+    const rawLeft = rect.left + rect.width / 2
+    const clampedLeft = Math.max(
+      PADDING + TOOLTIP_WIDTH / 2,
+      Math.min(rawLeft, window.innerWidth - PADDING - TOOLTIP_WIDTH / 2)
+    )
+    setPos({ top: rect.bottom + 8, left: clampedLeft, above: false, ready: false })
   }, [visible])
+
+  // Pass 2: after tooltip renders, measure actual height and decide above/below
+  useLayoutEffect(() => {
+    if (!pos || pos.ready || !triggerRef.current || !tooltipRef.current) return
+    const rect = triggerRef.current.getBoundingClientRect()
+    const tooltipHeight = tooltipRef.current.offsetHeight
+    const spaceBelow = window.innerHeight - rect.bottom - 8
+    const above = spaceBelow < tooltipHeight + 8
+    const top = above ? rect.top - tooltipHeight - 8 : rect.bottom + 8
+    setPos(p => p ? { ...p, top, above, ready: true } : null)
+  }, [pos])
 
   useEffect(() => {
     if (!open) return
@@ -48,8 +70,15 @@ export function InfoTooltip({ text }: { text: string }) {
       {visible && pos && createPortal(
         <div
           ref={tooltipRef}
-          style={{ position: "fixed", top: pos.top, left: pos.left, transform: "translateX(-50%)" }}
-          className="w-64 rounded-lg bg-[#111110] px-3 py-2.5 text-[11px] font-normal normal-case tracking-normal text-white shadow-lg z-[9999] text-left leading-relaxed whitespace-pre-line"
+          style={{
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            transform: "translateX(-50%)",
+            width: TOOLTIP_WIDTH,
+            visibility: pos.ready ? "visible" : "hidden",
+          }}
+          className="rounded-lg bg-[#111110] px-3 py-2.5 text-[11px] font-normal normal-case tracking-normal text-white shadow-lg z-[9999] text-left leading-relaxed whitespace-pre-line"
         >
           {text}
         </div>,

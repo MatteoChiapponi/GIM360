@@ -30,7 +30,7 @@ type HealthIndexMetrics = {
     totalStudents: number; totalCapacity: number; hasGroupsWithoutCapacity: boolean
   }
   dim3Eficiencia: { score: number; maxScore: number; costRatio: number }
-  dim4Ebitda: { score: number; maxScore: number; ebitdaMargin: number }
+  dim4Ganancias: { score: number; maxScore: number; ebitdaMargin: number }
 }
 
 type MetricView = "optimizacion" | "gimnasio" | "grupos"
@@ -162,6 +162,7 @@ function HealthIndexView({ health: h }: { health: HealthIndexMetrics }) {
         <div className="flex items-baseline gap-3">
           <span className="text-5xl font-bold font-mono" style={{ color }}>{h.score}</span>
           <span className="text-2xl text-[#A5A49D] font-mono">/ 100</span>
+          <InfoTooltip text={`¿Qué es este puntaje?\n\nMide la salud financiera del gimnasio en un número del 0 al 100, combinando cuatro aspectos clave: qué tan rentables son los grupos, qué tan llenos están, qué parte de los ingresos se va en costos, y cuánto queda de ganancia neta.\n\n¿Cómo se calcula?\nCada aspecto aporta puntos según su rendimiento:\n• Rentabilidad — hasta 35 pts\n• Ocupación — hasta 35 pts\n• Ganancias — hasta 20 pts\n• Eficiencia de costos — hasta 10 pts\n\nNiveles:\n80–100 → Saludable\n60–79 → En desarrollo\n40–59 → Con problemas\n0–39 → Crítico`} />
         </div>
         <div className="flex flex-col gap-1">
           <span className="inline-block rounded-full px-3 py-0.5 text-xs font-semibold text-white w-fit" style={{ backgroundColor: color }}>
@@ -178,7 +179,7 @@ function HealthIndexView({ health: h }: { health: HealthIndexMetrics }) {
           score={h.dim1Rentabilidad.score}
           maxScore={h.dim1Rentabilidad.maxScore}
           metric={`Margen ponderado: ${Math.round(h.dim1Rentabilidad.weightedMarginPct * 100)}%`}
-          tooltip={`¿Cuánto queda de cada peso cobrado después de pagar a los profesores?\n\nUn margen alto significa que los grupos generan suficiente dinero para cubrir los sueldos y todavía sobra. Un margen bajo o negativo indica que los profesores cuestan más de lo que ingresa.\n\nSe pondera por ingresos: los grupos que más facturan tienen más peso en el resultado.\n\nEscalones:\n≥ 50% → 35 pts\n≥ 40% → 25 pts\n≥ 30% → 15 pts\n≥ 20% → 5 pts\n< 20% → 0 pts`}
+          tooltip={`¿Cuánto queda de cada peso cobrado después de pagar a los profesores?\n\nUn margen alto significa que los grupos generan suficiente dinero para cubrir los sueldos y todavía sobra. Un margen bajo o negativo indica que los profesores cuestan más de lo que ingresa.\n\nSe pondera por ingresos: los grupos que más facturan tienen más peso en el resultado.\n\nPuntaje (máx. 35):\n≥ 50% de margen → 35 pts\n≥ 40% de margen → 25 pts\n≥ 30% de margen → 15 pts\n≥ 20% de margen → 5 pts\n< 20% de margen → 0 pts\n\nNiveles del puntaje total:\n80–100 → Saludable\n60–79 → En desarrollo\n40–59 → Con problemas\n0–39 → Crítico`}
         />
         <DimCard
           name="Ocupación"
@@ -189,21 +190,21 @@ function HealthIndexView({ health: h }: { health: HealthIndexMetrics }) {
               ? `Ocupación: ${Math.round(h.dim2Ocupacion.occupancyRate * 100)}% (${h.dim2Ocupacion.totalStudents} / ${h.dim2Ocupacion.totalCapacity} lugares)${h.dim2Ocupacion.hasGroupsWithoutCapacity ? " — algunos grupos sin capacidad" : ""}`
               : "Sin grupos con capacidad máxima configurada"
           }
-          tooltip={`¿Qué tan llenos están los grupos del gimnasio?\n\nCompara la cantidad de alumnos activos con la capacidad máxima de cada grupo. Un gimnasio con alta ocupación aprovecha mejor su infraestructura y sus profesores. Una ocupación baja significa que hay lugares disponibles que no generan ingresos.\n\nSe considera "óptimo" a partir del 90% de ocupación.\n\nFórmula: total de alumnos / total de lugares disponibles.${h.dim2Ocupacion.hasGroupsWithoutCapacity ? "\n\nNota: los grupos sin capacidad máxima configurada no se incluyen en este cálculo." : ""}`}
+          tooltip={`¿Qué tan llenos están los grupos del gimnasio?\n\nCompara la cantidad de alumnos activos con la capacidad máxima de cada grupo. Un gimnasio con alta ocupación aprovecha mejor su infraestructura y sus profesores. Una ocupación baja significa que hay lugares disponibles que no generan ingresos.\n\nPuntaje (máx. 35):\n≥ 90% de ocupación → 35 pts\n~64% de ocupación → ~25 pts\n~45% de ocupación → ~17 pts\n~26% de ocupación → ~10 pts\n\nNiveles del puntaje total:\n80–100 → Saludable\n60–79 → En desarrollo\n40–59 → Con problemas\n0–39 → Crítico${h.dim2Ocupacion.hasGroupsWithoutCapacity ? "\n\nNota: los grupos sin capacidad máxima configurada no se incluyen en este cálculo." : ""}`}
         />
         <DimCard
           name="Eficiencia de costos"
           score={h.dim3Eficiencia.score}
           maxScore={h.dim3Eficiencia.maxScore}
           metric={`Ratio de costos: ${Math.round(h.dim3Eficiencia.costRatio * 100)}% de lo cobrado`}
-          tooltip={`¿Qué parte de lo cobrado se va en gastos?\n\nSuma el costo de profesores más los gastos fijos (alquiler, servicios, etc.) y lo compara con el total cobrado. Un ratio bajo significa que el gimnasio gasta poco en relación a lo que ingresa — señal de buena eficiencia. Un ratio alto indica que casi todo lo que entra se va en costos.\n\nSe considera eficiente cuando los costos totales no superan el 55% de lo cobrado.`}
+          tooltip={`¿Qué parte de lo cobrado se va en gastos?\n\nSuma el costo de profesores más los gastos fijos (alquiler, servicios, etc.) y lo compara con el total cobrado. Un ratio bajo significa que el gimnasio gasta poco en relación a lo que ingresa — señal de buena eficiencia. Un ratio alto indica que casi todo lo que entra se va en costos.\n\nPuntaje (máx. 10):\n≤ 55% en costos → 10 pts\n~65% en costos → ~8 pts\n~78% en costos → ~5 pts\n≥ 100% en costos → 0 pts\n\nNiveles del puntaje total:\n80–100 → Saludable\n60–79 → En desarrollo\n40–59 → Con problemas\n0–39 → Crítico`}
         />
         <DimCard
-          name="EBITDA"
-          score={h.dim4Ebitda.score}
-          maxScore={h.dim4Ebitda.maxScore}
-          metric={`Margen EBITDA: ${Math.round(h.dim4Ebitda.ebitdaMargin * 100)}%`}
-          tooltip={`¿Qué queda realmente en el gimnasio al final del mes?\n\nEs la ganancia neta: lo cobrado menos los profesores y todos los gastos fijos. Si es positivo, el gimnasio genera dinero. Si es negativo, está perdiendo plata cada mes.\n\nSe considera saludable un margen de al menos 30% sobre lo cobrado. Por ejemplo, si se cobraron $100.000 y el EBITDA es $30.000, el margen es del 30%.`}
+          name="Ganancias"
+          score={h.dim4Ganancias.score}
+          maxScore={h.dim4Ganancias.maxScore}
+          metric={`Margen de ganancia: ${Math.round(h.dim4Ganancias.ebitdaMargin * 100)}%`}
+          tooltip={`¿Qué queda realmente en el gimnasio al final del mes?\n\nEs la ganancia neta: lo cobrado menos los profesores y todos los gastos fijos. Si es positivo, el gimnasio genera dinero. Si es negativo, está perdiendo plata cada mes.\n\nPuntaje (máx. 20):\n≥ 30% de ganancia → 20 pts\n~20% de ganancia → ~13 pts\n~10% de ganancia → ~7 pts\n≤ 0% de ganancia → 0 pts\n\nNiveles del puntaje total:\n80–100 → Saludable\n60–79 → En desarrollo\n40–59 → Con problemas\n0–39 → Crítico`}
         />
       </div>
     </div>

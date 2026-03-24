@@ -37,7 +37,7 @@ export type HealthIndexMetrics = {
     hasGroupsWithoutCapacity: boolean
   }
   dim3Eficiencia: { score: number; maxScore: number; costRatio: number }
-  dim4Ebitda: { score: number; maxScore: number; ebitdaMargin: number }
+  dim4Ganancias: { score: number; maxScore: number; ebitdaMargin: number }
 }
 
 function getLabel(score: number): HealthLabel {
@@ -176,17 +176,17 @@ export async function getHealthIndexMetrics(input: MetricsQueryInput): Promise<H
 
   if (totalCollectedRevenue > 0) {
     costRatio = (totalTrainerCost + totalFixedExpenses) / totalCollectedRevenue
-    dim3Score = Math.max(0, Math.min(Math.round(((1 - costRatio) / (1 - 0.55)) * 20), 20))
+    dim3Score = Math.max(0, Math.min(Math.round(((1 - costRatio) / (1 - 0.55)) * 10), 10))
   }
 
-  // ── Dim 4 — EBITDA (max 10) ──────────────────────────────────────────────────
+  // ── Dim 4 — Ganancias / EBITDA (max 20) ──────────────────────────────────────
   let dim4Score = 0
   let ebitdaMargin = 0
 
   if (totalCollectedRevenue > 0) {
     ebitdaMargin = ebitda / totalCollectedRevenue
     if (ebitdaMargin > 0) {
-      dim4Score = Math.max(0, Math.min(Math.round((ebitdaMargin / 0.3) * 10), 10))
+      dim4Score = Math.max(0, Math.min(Math.round((ebitdaMargin / 0.3) * 20), 20))
     }
   }
 
@@ -204,7 +204,7 @@ export async function getHealthIndexMetrics(input: MetricsQueryInput): Promise<H
       totalCapacity,
       hasGroupsWithoutCapacity,
     },
-    dim3Eficiencia: { score: dim3Score, maxScore: 20, costRatio },
-    dim4Ebitda: { score: dim4Score, maxScore: 10, ebitdaMargin },
+    dim3Eficiencia: { score: dim3Score, maxScore: 10, costRatio },
+    dim4Ganancias: { score: dim4Score, maxScore: 20, ebitdaMargin },
   }
 }
