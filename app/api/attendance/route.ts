@@ -5,7 +5,9 @@ import { gymBelongsToUser } from "@/modules/belongs/belongs.service"
 import {
   ensureAttendanceUpToDate,
   getAttendanceByGymDate,
+  getAttendanceByGymDateRange,
   getTrainerAttendanceForDate,
+  getTrainerAttendanceForDateRange,
 } from "@/modules/attendance/attendance.service"
 import { generateAttendanceSchema } from "@/modules/attendance/attendance.schema"
 import { getTrainerByUserId } from "@/modules/trainers/trainers.service"
@@ -14,6 +16,7 @@ import { logger } from "@/lib/logger"
 export const GET = withAuth([UserRole.TRAINER, UserRole.OWNER], async (req, session) => {
   const gymId = req.nextUrl.searchParams.get("gymId")
   const date = req.nextUrl.searchParams.get("date")
+  const dateTo = req.nextUrl.searchParams.get("dateTo")
   if (!gymId || !date) {
     logger.warn("Missing required param: gymId and date")
     return NextResponse.json({ error: "gymId and date required" }, { status: 400 })
@@ -30,9 +33,15 @@ export const GET = withAuth([UserRole.TRAINER, UserRole.OWNER], async (req, sess
       logger.warn("Trainer not found or does not belong to gym", { gymId, userId: session.user.id })
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
+    if (dateTo) {
+      return NextResponse.json(await getTrainerAttendanceForDateRange(trainer.id, gymId, date, dateTo))
+    }
     return NextResponse.json(await getTrainerAttendanceForDate(trainer.id, gymId, date))
   }
 
+  if (dateTo) {
+    return NextResponse.json(await getAttendanceByGymDateRange(gymId, date, dateTo))
+  }
   return NextResponse.json(await getAttendanceByGymDate(gymId, date))
 })
 

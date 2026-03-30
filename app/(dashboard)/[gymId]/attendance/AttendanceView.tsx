@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import AttendanceCalendar from "@/app/(dashboard)/trainer/attendance/AttendanceCalendar"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -102,6 +103,8 @@ export default function AttendanceView({ gymId }: Props) {
   const [records, setRecords] = useState<AttendanceRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const [calendarRefreshKey, setCalendarRefreshKey] = useState(0)
 
   // ── State: selected group (State 2) ──
   const [selectedRecord, setSelectedRecord] = useState<AttendanceRecord | null>(null)
@@ -206,6 +209,7 @@ export default function AttendanceView({ gymId }: Props) {
       setRecords((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
 
       // Return to group list
+      setCalendarRefreshKey((k) => k + 1)
       setSelectedRecord(null)
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Error inesperado.")
@@ -398,6 +402,7 @@ export default function AttendanceView({ gymId }: Props) {
       ) : (
         <div className="space-y-2">
           {todayRecords.map((record) => {
+
             const time = getScheduleTimeForToday(record.group.schedules)
             const hasTaken = record.detail !== null
             const presentTotal = hasTaken
@@ -467,6 +472,13 @@ export default function AttendanceView({ gymId }: Props) {
           })}
         </div>
       )}
+
+      <AttendanceCalendar
+        gymId={gymId}
+        onSelectRecord={handleSelectRecord}
+        refreshKey={calendarRefreshKey}
+        statusMode="all-taken"
+      />
     </div>
   )
 }

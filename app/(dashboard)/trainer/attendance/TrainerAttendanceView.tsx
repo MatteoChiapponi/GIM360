@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
+import AttendanceCalendar from "./AttendanceCalendar"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -90,9 +91,11 @@ function getScheduleTimeForToday(schedules: ScheduleInfo[]): string {
 
 export default function TrainerAttendanceView() {
   // ── State: data ──
+  const [gymId, setGymId] = useState<string | null>(null)
   const [records, setRecords] = useState<AttendanceRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [calendarRefreshKey, setCalendarRefreshKey] = useState(0)
 
   // ── State: selected group (State 2) ──
   const [selectedRecord, setSelectedRecord] = useState<AttendanceRecord | null>(null)
@@ -114,6 +117,7 @@ export default function TrainerAttendanceView() {
         const profileData: TrainerProfile = await profileRes.json()
         const date = todayDateStr()
         const gymId = profileData.gym.id
+        setGymId(gymId)
 
         const postRes = await fetch("/api/attendance", {
           method: "POST",
@@ -199,6 +203,9 @@ export default function TrainerAttendanceView() {
 
       // Update local records list
       setRecords((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
+
+      // Invalidate calendar cache
+      setCalendarRefreshKey((k) => k + 1)
 
       // Return to group list
       setSelectedRecord(null)
@@ -465,6 +472,15 @@ export default function TrainerAttendanceView() {
               })}
             </div>
           </>
+        )}
+
+        {/* Historical calendar */}
+        {gymId && !loading && (
+          <AttendanceCalendar
+            gymId={gymId}
+            onSelectRecord={handleSelectRecord}
+            refreshKey={calendarRefreshKey}
+          />
         )}
       </main>
     </div>

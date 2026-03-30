@@ -23,12 +23,14 @@ function floorToUTCDay(d: Date): Date {
 
 /**
  * Genera registros de asistencia vacíos (detail: null) para todos los días
- * donde los grupos del gym tenían horario, desde el último registro existente
+ * donde los grupos del gym tienen horario activo, siempre desde hace 1 año
  * hasta `upToDate` inclusive.
  *
- * - Primera apertura: va desde el startDate del horario más antiguo (máx. 1 año atrás).
- * - Aperturas posteriores: solo genera desde el día siguiente al último registro.
- * - Idempotente via skipDuplicates como red de seguridad.
+ * - Siempre regenera desde 1 año atrás (ignora schedule.startDate).
+ * - Respeta schedule.endDate: si el horario fue dado de baja, no genera más.
+ * - Completamente idempotente via skipDuplicates (ON CONFLICT DO NOTHING).
+ * - Esto garantiza que grupos nuevos o con startDate reciente también
+ *   tengan registros históricos completos.
  */
 export async function ensureAttendanceUpToDate(gymId: string, upToDate: string) {
   const upToDateObj = parseDate(upToDate)
@@ -38,7 +40,7 @@ export async function ensureAttendanceUpToDate(gymId: string, upToDate: string) 
     select: {
       id: true,
       schedules: {
-        select: { weekDays: true, startDate: true, endDate: true },
+        select: { weekDays: true, endDate: true },
       },
     },
   })
@@ -46,40 +48,13 @@ export async function ensureAttendanceUpToDate(gymId: string, upToDate: string) 
   const scheduledGroups = groups.filter((g) => g.schedules.length > 0)
   if (scheduledGroups.length === 0) return getAttendanceByGymDate(gymId, upToDate)
 
-  // Determinar la fecha desde donde generar
-  const lastRecord = await db.attendance.findFirst({
-    where: { gymId, date: { lte: upToDateObj } },
-    orderBy: { date: "desc" },
-    select: { date: true },
-  })
-
   const oneYearAgo = new Date(upToDateObj)
   oneYearAgo.setUTCFullYear(oneYearAgo.getUTCFullYear() - 1)
 
-  let fromDate: Date
-  if (lastRecord) {
-    // Solo generar lo que falta: desde el día siguiente al último registro (máx. 1 año atrás)
-    const next = floorToUTCDay(lastRecord.date)
-    next.setUTCDate(next.getUTCDate() + 1)
-    fromDate = next < oneYearAgo ? oneYearAgo : next
-  } else {
-    // Primera vez: ir desde el startDate más antiguo (máx. 1 año atrás)
-    fromDate = upToDateObj
-    for (const group of scheduledGroups) {
-      for (const schedule of group.schedules) {
-        const sd = floorToUTCDay(schedule.startDate)
-        const effectiveStart = sd < oneYearAgo ? oneYearAgo : sd
-        if (effectiveStart < fromDate) fromDate = effectiveStart
-      }
-    }
-  }
-
-  // Si ya estamos al día, no hay nada que generar
-  if (fromDate > upToDateObj) return getAttendanceByGymDate(gymId, upToDate)
-
-  // Iterar cada día e identificar qué grupos tienen horario activo
+  // Iterar cada día e identificar qué grupos tienen horario activo.
+  // No se chequea startDate (retroactivo); sí se respeta endDate.
   const toInsert: { gymId: string; groupId: string; date: Date }[] = []
-  const cursor = new Date(fromDate)
+  const cursor = new Date(oneYearAgo)
 
   while (cursor <= upToDateObj) {
     const dayOfWeek = JS_DAY_TO_ENUM[cursor.getUTCDay()]
@@ -89,7 +64,6 @@ export async function ensureAttendanceUpToDate(gymId: string, upToDate: string) 
       const hasSchedule = group.schedules.some(
         (s) =>
           s.weekDays.includes(dayOfWeek) &&
-          floorToUTCDay(s.startDate) <= cursorDay &&
           (s.endDate === null || floorToUTCDay(s.endDate) >= cursorDay),
       )
       if (hasSchedule) {
@@ -105,6 +79,27 @@ export async function ensureAttendanceUpToDate(gymId: string, upToDate: string) 
   }
 
   return getAttendanceByGymDate(gymId, upToDate)
+}
+
+/** Todos los registros de asistencia de un gym en un rango de fechas. */
+export async function getAttendanceByGymDateRange(gymId: string, dateFrom: string, dateTo: string) {
+  const dateFromObj = parseDate(dateFrom)
+  const dateToObj = parseDate(dateTo)
+  return db.attendance.findMany({
+    where: { gymId, date: { gte: dateFromObj, lte: dateToObj } },
+    include: {
+      group: {
+        select: {
+          id: true,
+          name: true,
+          schedules: {
+            select: { weekDays: true, startTime: true, endTime: true },
+          },
+        },
+      },
+    },
+    orderBy: { date: "asc" },
+  })
 }
 
 /** Todos los registros de asistencia de un gym en una fecha, con info del grupo. */
@@ -248,6 +243,48 @@ export async function submitAttendance(
         },
       },
     },
+  })
+}
+
+/**
+ * Registros de asistencia de un trainer para un rango de fechas,
+ * filtrados a sus grupos asignados y ordenados por fecha asc.
+ */
+export async function getTrainerAttendanceForDateRange(
+  trainerId: string,
+  gymId: string,
+  dateFrom: string,
+  dateTo: string,
+) {
+  const dateFromObj = parseDate(dateFrom)
+  const dateToObj = parseDate(dateTo)
+
+  const trainerGroups = await db.trainerGroup.findMany({
+    where: { trainerId },
+    select: { groupId: true },
+  })
+  const groupIds = trainerGroups.map((tg) => tg.groupId)
+
+  if (groupIds.length === 0) return []
+
+  return db.attendance.findMany({
+    where: {
+      gymId,
+      date: { gte: dateFromObj, lte: dateToObj },
+      groupId: { in: groupIds },
+    },
+    include: {
+      group: {
+        select: {
+          id: true,
+          name: true,
+          schedules: {
+            select: { weekDays: true, startTime: true, endTime: true },
+          },
+        },
+      },
+    },
+    orderBy: { date: "asc" },
   })
 }
 
