@@ -149,6 +149,34 @@ function DimCard({ name, score, maxScore, metric, tooltip }: {
   )
 }
 
+function OccupancyCard({ occ }: { occ: HealthIndexMetrics["dim2Ocupacion"] }) {
+  const occPct = occ.occupancyRate != null ? Math.round(occ.occupancyRate * 100) : null
+  const color = occPct != null ? (occPct >= 80 ? "#10b981" : occPct >= 50 ? "#f59e0b" : "#ef4444") : "#A5A49D"
+  return (
+    <div className="rounded-xl border border-[#E5E4E0] bg-white px-5 py-4 space-y-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Ocupación general de grupos</p>
+      <div className="flex items-baseline gap-3">
+        {occPct != null ? (
+          <>
+            <span className="text-3xl font-bold font-mono" style={{ color }}>{occPct}%</span>
+            <span className="text-sm text-[#68685F]">{occ.totalStudents} de {occ.totalCapacity} lugares ocupados</span>
+          </>
+        ) : (
+          <span className="text-sm text-[#A5A49D]">Sin capacidad máxima configurada en los grupos</span>
+        )}
+      </div>
+      {occPct != null && (
+        <div className="h-2 w-full overflow-hidden rounded-full bg-[#F0EFEB]">
+          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.min(occPct, 100)}%`, backgroundColor: color }} />
+        </div>
+      )}
+      {occ.hasGroupsWithoutCapacity && (
+        <p className="text-xs text-[#A5A49D]">Algunos grupos no tienen capacidad máxima configurada y no se incluyen en este cálculo.</p>
+      )}
+    </div>
+  )
+}
+
 function HealthIndexView({ health: h }: { health: HealthIndexMetrics }) {
   const color = scoreColor(h.score)
   return (
@@ -555,12 +583,19 @@ export default function MetricsView({ gymId }: { gymId: string }) {
 
           {/* ── GRUPOS ── */}
           {activeView === "grupos" && (
-            <div>
+            <div className="space-y-5">
               {selectedGroup ? (
                 <GroupDetailView group={selectedGroup} onBack={() => setSelectedGroup(null)} />
-              ) : groupMetrics.length === 0 ? (
-                <p className="text-sm text-[#A5A49D]">No hay grupos en este gimnasio.</p>
               ) : (
+                <>
+                  {/* Ocupación general */}
+                  {healthMetrics && (
+                    <OccupancyCard occ={healthMetrics.dim2Ocupacion} />
+                  )}
+
+                  {groupMetrics.length === 0 ? (
+                    <p className="text-sm text-[#A5A49D]">No hay grupos en este gimnasio.</p>
+                  ) : (
                 <div className="overflow-x-auto rounded-xl border border-[#E5E4E0] bg-white">
                   <table className="w-full min-w-[640px] text-sm">
                     <thead>
@@ -630,6 +665,8 @@ export default function MetricsView({ gymId }: { gymId: string }) {
                     </tfoot>
                   </table>
                 </div>
+                  )}
+                </>
               )}
             </div>
           )}
