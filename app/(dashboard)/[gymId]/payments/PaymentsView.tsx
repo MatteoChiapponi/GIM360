@@ -141,8 +141,40 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
   const [closingSubmitting, setClosingSubmitting] = useState(false)
   const [closingReport, setClosingReport] = useState<ClosingReport | null>(null)
 
+  // Undo closing state
+  const [hasClosings, setHasClosings] = useState(false)
+  const [showUndoConfirm, setShowUndoConfirm] = useState(false)
+  const [undoSubmitting, setUndoSubmitting] = useState(false)
+  const [undoError, setUndoError] = useState<string | null>(null)
+
+  // Payment list inside closing dialog
+  const [expandPaymentList, setExpandPaymentList] = useState(false)
+  const [paymentListSearch, setPaymentListSearch] = useState("")
+  const [excludedPaymentIds, setExcludedPaymentIds] = useState<Set<string>>(new Set())
+  const [showExclusionConfirm, setShowExclusionConfirm] = useState(false)
+
   const [mutationError, setMutationError] = useState<string | null>(null)
   const [closingError, setClosingError] = useState<string | null>(null)
+
+  const fetchHasClosings = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/cash-closings?gymId=${gymId}`)
+      if (res.ok) {
+        const list = await res.json()
+        setHasClosings(Array.isArray(list) && list.length > 0)
+      }
+    } catch { /* silencioso */ }
+  }, [gymId])
+
+  useEffect(() => { fetchHasClosings() }, [fetchHasClosings])
+
+  useEffect(() => {
+    if (showClosingConfirm) {
+      setExpandPaymentList(false)
+      setPaymentListSearch("")
+      setExcludedPaymentIds(new Set())
+    }
+  }, [showClosingConfirm])
 
   const fetchPayments = useCallback(async (signal?: AbortSignal) => {
     setLoading(true)
@@ -225,13 +257,44 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
     }
   }
 
+  async function handleUndoCashClosing() {
+    setUndoSubmitting(true)
+    setUndoError(null)
+    try {
+      const res = await fetch(`/api/cash-closings?gymId=${gymId}`, { method: "DELETE" })
+      if (res.ok) {
+        setShowUndoConfirm(false)
+        await fetchHasClosings()
+        await fetchPayments()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setUndoError(data?.error ?? "No se pudo deshacer la confirmación.")
+      }
+    } catch {
+      setUndoError("Error de conexión. Intentá de nuevo.")
+    }
+    setUndoSubmitting(false)
+  }
+
+  function handleClosingConfirmClick() {
+    if (excludedPaymentIds.size > 0) {
+      setShowExclusionConfirm(true)
+    } else {
+      handleCashClosing()
+    }
+  }
+
   async function handleCashClosing() {
+    setShowExclusionConfirm(false)
     setClosingSubmitting(true)
     setClosingError(null)
     try {
       const res = await fetch("/api/cash-closings", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gymId }),
+        body: JSON.stringify({
+          gymId,
+          ...(excludedPaymentIds.size > 0 ? { excludedPaymentIds: Array.from(excludedPaymentIds) } : {}),
+        }),
       })
       const data = await res.json()
       if (res.ok) {
@@ -248,9 +311,10 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
           toDate: data.toDate,
         })
         setShowClosingConfirm(false)
+        await fetchHasClosings()
         await fetchPayments()
       } else {
-        setClosingError(data?.error ?? "No se pudo cerrar la caja.")
+        setClosingError(data?.error ?? "No se pudieron confirmar los pagos.")
       }
     } catch {
       setClosingError("Error de conexión. Intentá de nuevo.")
@@ -303,28 +367,119 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
     {} as Record<PaymentMethod, { count: number; total: number }>,
   )
 
+  const includedInClosing = unverifiedPaid.filter((p) => !excludedPaymentIds.has(p.id))
+  const includedCollected = includedInClosing.reduce((sum, p) => sum + Number(p.amount), 0)
+  const paymentListFiltered = unverifiedPaid.filter((p) =>
+    `${p.student.firstName} ${p.student.lastName}`.toLowerCase().includes(paymentListSearch.toLowerCase())
+  )
+
   const closingMessage = (
     <div className="space-y-3">
       <p>
-        Se verificarán <span className="font-semibold">{unverifiedPaid.length}</span> pago{unverifiedPaid.length !== 1 ? "s" : ""} cobrado{unverifiedPaid.length !== 1 ? "s" : ""}.
+        Se confirmarán <span className="font-semibold">{includedInClosing.length}</span> pago{includedInClosing.length !== 1 ? "s" : ""} cobrado{includedInClosing.length !== 1 ? "s" : ""}.
+        {excludedPaymentIds.size > 0 && (
+          <span className="text-amber-600"> ({excludedPaymentIds.size} excluido{excludedPaymentIds.size !== 1 ? "s" : ""})</span>
+        )}
       </p>
       <div className="rounded-lg border border-[#E5E4E0] bg-[#FAFAF9] p-3 space-y-2">
         {(["CASH", "TRANSFER", "CARD"] as PaymentMethod[]).map((method) => {
-          const data = unverifiedByMethod[method]
-          if (!data) return null
+          const included = includedInClosing.filter((p) => p.paymentMethod === method)
+          if (included.length === 0) return null
+          const total = included.reduce((s, p) => s + Number(p.amount), 0)
           return (
             <div key={method} className="flex items-center justify-between text-sm">
-              <span className="text-[#68685F]">{METHOD_LABEL[method]} ({data.count})</span>
-              <span className="font-mono font-semibold text-[#111110]">${data.total.toLocaleString("es-AR")}</span>
+              <span className="text-[#68685F]">{METHOD_LABEL[method]} ({included.length})</span>
+              <span className="font-mono font-semibold text-[#111110]">${total.toLocaleString("es-AR")}</span>
             </div>
           )
         })}
         <div className="border-t border-[#E5E4E0] pt-2 flex items-center justify-between text-sm font-semibold">
-          <span className="text-[#111110]">Total ({unverifiedPaid.length})</span>
-          <span className="font-mono text-[#111110]">${unverifiedCollected.toLocaleString("es-AR")}</span>
+          <span className="text-[#111110]">Total ({includedInClosing.length})</span>
+          <span className="font-mono text-[#111110]">${includedCollected.toLocaleString("es-AR")}</span>
         </div>
       </div>
-      <p className="text-xs text-[#A5A49D]">Los pagos verificados no podrán modificarse.</p>
+
+      {/* Desplegable de pagos */}
+      <div className="rounded-lg border border-[#E5E4E0] overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setExpandPaymentList((v) => !v)}
+          className={`w-full flex items-center justify-between gap-2 px-4 py-3 text-sm font-semibold transition-colors cursor-pointer ${expandPaymentList ? "bg-[#F5F4F0] text-[#111110]" : "bg-[#FAFAF9] text-[#68685F] hover:bg-[#F5F4F0] hover:text-[#111110]"}`}
+        >
+          <span className="flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4 opacity-60">
+              <path fillRule="evenodd" d="M2 4.75A.75.75 0 0 1 2.75 4h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75Zm0 6.5a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Zm.75-3.25a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5Z" clipRule="evenodd" />
+            </svg>
+            {expandPaymentList ? "Ocultar" : "Ver"} detalle de pagos
+            <span className="rounded-full bg-[#E5E4E0] px-2 py-0.5 text-xs font-medium text-[#68685F]">{unverifiedPaid.length}</span>
+          </span>
+          <svg
+            xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor"
+            className={`h-4 w-4 transition-transform ${expandPaymentList ? "rotate-180" : ""}`}
+          >
+            <path fillRule="evenodd" d="M4.22 6.22a.75.75 0 0 1 1.06 0L8 8.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+          </svg>
+        </button>
+
+        {expandPaymentList && (
+          <div className="border-t border-[#E5E4E0] p-3 space-y-2">
+            <input
+              type="text"
+              placeholder="Buscar alumno…"
+              value={paymentListSearch}
+              onChange={(e) => setPaymentListSearch(e.target.value)}
+              className="w-full rounded-lg border border-[#E5E4E0] bg-white px-3 py-1.5 text-sm text-[#111110] placeholder:text-[#A5A49D] outline-none focus:border-[#111110] transition-colors"
+            />
+            <div className="max-h-52 overflow-y-auto rounded-lg border border-[#E5E4E0] bg-white divide-y divide-[#F0EFEB]">
+              {paymentListFiltered.length === 0 ? (
+                <p className="px-3 py-2 text-xs text-[#A5A49D]">Sin resultados.</p>
+              ) : (
+                paymentListFiltered.map((p) => {
+                  const excluded = excludedPaymentIds.has(p.id)
+                  return (
+                    <label
+                      key={p.id}
+                      className={`flex items-center gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-[#FAFAF9] transition-colors ${excluded ? "opacity-40" : ""}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!excluded}
+                        onChange={(e) => {
+                          setExcludedPaymentIds((prev) => {
+                            const next = new Set(prev)
+                            if (e.target.checked) next.delete(p.id)
+                            else next.add(p.id)
+                            return next
+                          })
+                        }}
+                        className="h-3.5 w-3.5 rounded accent-[#111110] cursor-pointer shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <span className="block text-xs font-medium text-[#111110] truncate">
+                          {p.student.firstName} {p.student.lastName}
+                        </span>
+                        {p.paidAt && (
+                          <span className="text-[10px] text-[#A5A49D]">
+                            {new Date(p.paidAt).toLocaleDateString("es-AR")}
+                          </span>
+                        )}
+                      </div>
+                      {p.paymentMethod && (
+                        <span className="text-[10px] text-[#A5A49D] shrink-0">{METHOD_LABEL[p.paymentMethod]}</span>
+                      )}
+                      <span className="text-xs font-mono font-semibold text-[#111110] shrink-0">
+                        ${Number(p.amount).toLocaleString("es-AR")}
+                      </span>
+                    </label>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <p className="text-xs text-[#A5A49D]">Los pagos confirmados no podrán modificarse.</p>
     </div>
   )
 
@@ -344,11 +499,29 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
                   <path fillRule="evenodd" d="M1 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4Zm12 4a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM4 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm13-1a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM1.75 14.5a.75.75 0 0 0 0 1.5c4.417 0 8.693.603 12.749 1.73 1.111.309 2.251-.512 2.251-1.696v-.784a.75.75 0 0 0-1.5 0v.784a.272.272 0 0 1-.35.25A49.043 49.043 0 0 0 1.75 14.5Z" clipRule="evenodd" />
                 </svg>
-                Cerrar caja
+                Confirmar pagos
               </button>
               {!hasUnverifiedPaid && (
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-max max-w-[220px] rounded-lg bg-[#111110] px-3 py-2 text-xs text-white text-center z-10">
                   No hay pagos cobrados sin verificar
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#111110]" />
+                </div>
+              )}
+            </div>
+            <div className="relative group">
+              <button
+                onClick={() => setShowUndoConfirm(true)}
+                disabled={!hasClosings}
+                className="inline-flex items-center gap-2 rounded-lg border border-[#E5E4E0] bg-white px-4 py-2.5 text-sm font-semibold text-[#68685F] hover:bg-[#FAFAF9] hover:border-[#111110] hover:text-[#111110] transition-colors min-h-[44px] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:border-[#E5E4E0] disabled:hover:text-[#68685F]"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                  <path fillRule="evenodd" d="M7.793 2.232a.75.75 0 0 1-.025 1.06L3.622 7.25h10.003a5.375 5.375 0 0 1 0 10.75H10.75a.75.75 0 0 1 0-1.5h2.875a3.875 3.875 0 0 0 0-7.75H3.622l4.146 3.957a.75.75 0 0 1-1.036 1.085l-5.5-5.25a.75.75 0 0 1 0-1.085l5.5-5.25a.75.75 0 0 1 1.06.025Z" clipRule="evenodd" />
+                </svg>
+                Deshacer última confirmación
+              </button>
+              {!hasClosings && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-max max-w-[220px] rounded-lg bg-[#111110] px-3 py-2 text-xs text-white text-center z-10">
+                  No hay confirmaciones registradas
                   <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#111110]" />
                 </div>
               )}
@@ -378,7 +551,7 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
           >
             ✕
           </button>
-          <p className="text-sm font-semibold text-emerald-800">Caja cerrada correctamente</p>
+          <p className="text-sm font-semibold text-emerald-800">Pagos confirmados correctamente</p>
           <p className="text-xs text-emerald-600">
             Período: {new Date(closingReport.fromDate).toLocaleDateString("es-AR")} — {new Date(closingReport.toDate).toLocaleDateString("es-AR")}
           </p>
@@ -565,18 +738,59 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
       />
 
       <ConfirmDialog
+        open={showUndoConfirm}
+        title="Deshacer última confirmación"
+        message={undoError ? (
+          <div className="space-y-3">
+            <p>La última confirmación de pagos será eliminada. Todos los pagos que habían sido verificados volverán a aparecer como cobrados sin confirmar y podrán modificarse nuevamente, como si nunca se hubiera confirmado.</p>
+            <p className="text-sm font-medium text-red-600">⚠ {undoError}</p>
+          </div>
+        ) : "La última confirmación de pagos será eliminada. Todos los pagos que habían sido verificados volverán a aparecer como cobrados sin confirmar y podrán modificarse nuevamente, como si nunca se hubiera confirmado."}
+        confirmLabel={undoSubmitting ? "Deshaciendo…" : "Continuar"}
+        confirmVariant="danger"
+        onConfirm={handleUndoCashClosing}
+        onCancel={() => { setShowUndoConfirm(false); setUndoError(null) }}
+      />
+
+      <ConfirmDialog
         open={showClosingConfirm}
-        title="Cerrar caja"
+        title="Confirmar pagos"
         message={closingError ? (
           <div className="space-y-3">
             {closingMessage}
             <p className="text-sm font-medium text-red-600">⚠ {closingError}</p>
           </div>
         ) : closingMessage}
-        confirmLabel={closingSubmitting ? "Cerrando…" : "Confirmar cierre"}
+        confirmLabel={closingSubmitting ? "Confirmando…" : "Confirmar pagos"}
+        confirmVariant="primary"
+        onConfirm={handleClosingConfirmClick}
+        onCancel={() => { setShowClosingConfirm(false); setClosingError(null) }}
+        panelClassName="max-w-lg sm:max-w-2xl"
+      />
+
+      <ConfirmDialog
+        open={showExclusionConfirm}
+        title="Confirmar pagos con exclusiones"
+        message={
+          <div className="space-y-3">
+            <p>
+              Se confirmarán <span className="font-semibold">{includedInClosing.length}</span> pago{includedInClosing.length !== 1 ? "s" : ""}.
+              Los siguientes <span className="font-semibold">{excludedPaymentIds.size}</span> pago{excludedPaymentIds.size !== 1 ? "s" : ""} quedarán excluidos y podrán confirmarse más adelante:
+            </p>
+            <div className="rounded-lg border border-[#E5E4E0] bg-[#FAFAF9] p-3 space-y-1 max-h-40 overflow-y-auto">
+              {unverifiedPaid.filter((p) => excludedPaymentIds.has(p.id)).map((p) => (
+                <div key={p.id} className="flex items-center justify-between text-sm">
+                  <span className="text-[#68685F]">{p.student.firstName} {p.student.lastName}</span>
+                  <span className="font-mono font-semibold text-[#111110]">${Number(p.amount).toLocaleString("es-AR")}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        }
+        confirmLabel="Continuar"
         confirmVariant="primary"
         onConfirm={handleCashClosing}
-        onCancel={() => { setShowClosingConfirm(false); setClosingError(null) }}
+        onCancel={() => setShowExclusionConfirm(false)}
       />
 
       {/* Modal: seleccionar método de pago */}

@@ -9,6 +9,7 @@ interface ConfirmDialogProps {
   confirmVariant?: "primary" | "danger"
   onConfirm: () => void
   onCancel: () => void
+  panelClassName?: string
 }
 
 export function ConfirmDialog({
@@ -19,6 +20,7 @@ export function ConfirmDialog({
   confirmVariant = "danger",
   onConfirm,
   onCancel,
+  panelClassName,
 }: ConfirmDialogProps) {
   if (!open) return null
 
@@ -34,7 +36,7 @@ export function ConfirmDialog({
       />
 
       {/* Panel */}
-      <div className="relative w-full max-w-sm rounded-2xl border border-[#E5E4E0] bg-white px-6 py-6 shadow-xl space-y-4">
+      <div className={`relative w-full max-w-sm rounded-2xl border border-[#E5E4E0] bg-white px-6 py-6 shadow-xl space-y-4 ${panelClassName ?? ""}`}>
         <div className="space-y-1.5">
           <p className="text-[15px] font-semibold text-[#111110]">{title}</p>
           <div className="text-sm text-[#68685F] leading-relaxed">{message}</div>
