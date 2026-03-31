@@ -643,14 +643,29 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
           {
             key: "status",
             header: "Estado",
-            render: (p) => (
-              <div className="flex flex-col gap-0.5">
-                <StatusDot dotColor={STATUS_DOT[p.status]} textColor={STATUS_TEXT[p.status]} label={STATUS_LABEL[p.status]} />
-                {p.verified && (
-                  <span className="text-[10px] text-[#A5A49D]">Verificado</span>
-                )}
-              </div>
-            ),
+            render: (p) => {
+              const daysLate = p.status === "EXPIRED"
+                ? Math.floor((new Date().getTime() - dueDate(period, p.student.dueDay).getTime()) / 86400000)
+                : null
+              return (
+                <div className="flex flex-col gap-0.5">
+                  {daysLate !== null ? (
+                    <div className="relative group w-fit">
+                      <StatusDot dotColor={STATUS_DOT[p.status]} textColor={STATUS_TEXT[p.status]} label={STATUS_LABEL[p.status]} />
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-max rounded-lg bg-[#111110] px-3 py-1.5 text-xs text-white z-10">
+                        Vencido hace {daysLate === 1 ? "1 día" : `${daysLate} días`}
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#111110]" />
+                      </div>
+                    </div>
+                  ) : (
+                    <StatusDot dotColor={STATUS_DOT[p.status]} textColor={STATUS_TEXT[p.status]} label={STATUS_LABEL[p.status]} />
+                  )}
+                  {p.verified && (
+                    <span className="text-[10px] text-[#A5A49D]">Verificado</span>
+                  )}
+                </div>
+              )
+            },
           },
           {
             key: "paidAt",
