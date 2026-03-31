@@ -124,7 +124,7 @@ export async function getAttendanceByGymDate(gymId: string, date: string) {
 
 /**
  * Registros de asistencia de un trainer para una fecha,
- * filtrados a sus grupos asignados y ordenados por horario.
+ * filtrados a sus grupos asignados Y a los días que tiene asignados en cada grupo.
  */
 export async function getTrainerAttendanceForDate(
   trainerId: string,
@@ -136,9 +136,13 @@ export async function getTrainerAttendanceForDate(
 
   const trainerGroups = await db.trainerGroup.findMany({
     where: { trainerId },
-    select: { groupId: true },
+    select: { groupId: true, schedules: { select: { weekDay: true } } },
   })
-  const groupIds = trainerGroups.map((tg) => tg.groupId)
+
+  // Solo grupos donde el trainer tiene asignado ese día de la semana
+  const groupIds = trainerGroups
+    .filter((tg) => tg.schedules.some((s) => s.weekDay === dayOfWeek))
+    .map((tg) => tg.groupId)
 
   if (groupIds.length === 0) return []
 
@@ -248,7 +252,7 @@ export async function submitAttendance(
 
 /**
  * Registros de asistencia de un trainer para un rango de fechas,
- * filtrados a sus grupos asignados y ordenados por fecha asc.
+ * filtrados a sus grupos asignados Y a los días que tiene asignados en cada grupo.
  */
 export async function getTrainerAttendanceForDateRange(
   trainerId: string,
@@ -261,13 +265,20 @@ export async function getTrainerAttendanceForDateRange(
 
   const trainerGroups = await db.trainerGroup.findMany({
     where: { trainerId },
-    select: { groupId: true },
+    select: { groupId: true, schedules: { select: { weekDay: true } } },
   })
+
+  if (trainerGroups.length === 0) return []
+
+  // Map groupId → Set de días asignados al trainer en ese grupo
+  const groupWeekDays = new Map<string, Set<string>>()
+  for (const tg of trainerGroups) {
+    groupWeekDays.set(tg.groupId, new Set(tg.schedules.map((s) => s.weekDay)))
+  }
+
   const groupIds = trainerGroups.map((tg) => tg.groupId)
 
-  if (groupIds.length === 0) return []
-
-  return db.attendance.findMany({
+  const records = await db.attendance.findMany({
     where: {
       gymId,
       date: { gte: dateFromObj, lte: dateToObj },
@@ -285,6 +296,12 @@ export async function getTrainerAttendanceForDateRange(
       },
     },
     orderBy: { date: "asc" },
+  })
+
+  // Filtrar: solo registros en días donde el trainer está asignado en ese grupo
+  return records.filter((r) => {
+    const dow = JS_DAY_TO_ENUM[(r.date as Date).getUTCDay()]
+    return groupWeekDays.get(r.groupId)?.has(dow) ?? false
   })
 }
 
