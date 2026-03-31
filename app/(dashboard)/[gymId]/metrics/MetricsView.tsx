@@ -34,7 +34,7 @@ type HealthIndexMetrics = {
 type MetricView = "optimizacion" | "gimnasio" | "grupos"
 
 const VIEWS: { id: MetricView; label: string }[] = [
-  { id: "optimizacion", label: "Optimización" },
+  // { id: "optimizacion", label: "Optimización" }, // oculto temporalmente
   { id: "gimnasio", label: "Gimnasio" },
   { id: "grupos", label: "Grupos" },
 ]
@@ -392,7 +392,7 @@ function toYearMonth(d: Date) {
 
 export default function MetricsView({ gymId }: { gymId: string }) {
   const period = toYearMonth(new Date())
-  const [activeView, setActiveView] = useState<MetricView>("optimizacion")
+  const [activeView, setActiveView] = useState<MetricView>("gimnasio")
   const [healthMetrics, setHealthMetrics] = useState<HealthIndexMetrics | null>(null)
   const [gymMetrics, setGymMetrics] = useState<GymMetrics | null>(null)
   const [groupMetrics, setGroupMetrics] = useState<GroupMetrics[]>([])
@@ -473,6 +473,26 @@ export default function MetricsView({ gymId }: { gymId: string }) {
           {/* ── GIMNASIO ── */}
           {activeView === "gimnasio" && (
             <div className="space-y-5">
+              {/* Puntaje de optimización */}
+              {healthMetrics && (
+                <div className="rounded-xl border border-[#E5E4E0] bg-white px-6 py-5 space-y-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Optimización del gimnasio</p>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                    <div className="flex items-baseline gap-3">
+                      <span className="text-5xl font-bold font-mono" style={{ color: scoreColor(healthMetrics.score) }}>{healthMetrics.score}</span>
+                      <span className="text-2xl text-[#A5A49D] font-mono">/ 100</span>
+                      <InfoTooltip text={`Puntaje de salud financiera del gimnasio (0–100).\n\nMétricas consideradas:\n• Rentabilidad de grupos\n• Ocupación\n• Ganancias netas\n• Eficiencia de costos`} />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="inline-block rounded-full px-3 py-0.5 text-xs font-semibold text-white w-fit" style={{ backgroundColor: scoreColor(healthMetrics.score) }}>
+                        {healthMetrics.label}
+                      </span>
+                      <p className="text-sm text-[#68685F] max-w-sm">{labelDescription(healthMetrics.label)}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Hero: Ganancia del mes */}
               <MetricCard
                 size="hero"
