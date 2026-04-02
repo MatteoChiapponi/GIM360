@@ -1,3 +1,5 @@
+import bcrypt from "bcryptjs"
+import { UserRole } from "@/app/generated/prisma/client"
 import { db } from "@/lib/db"
 import type { CreateTrainerInput, UpdateTrainerInput } from "./trainers.schema"
 
@@ -31,7 +33,7 @@ export async function createTrainer(data: CreateTrainerInput) {
   return db.trainer.create({
     data: {
       ...data,
-      startedAt: data.startedAt ? new Date(data.startedAt) : undefined,
+      startedAt: data.startedAt ? new Date(data.startedAt) : null,
     },
   })
 }
@@ -41,14 +43,65 @@ export async function updateTrainer(id: string, data: UpdateTrainerInput) {
     where: { id },
     data: {
       ...data,
-      startedAt: data.startedAt ? new Date(data.startedAt) : undefined,
+      startedAt: data.startedAt === undefined ? undefined : data.startedAt ? new Date(data.startedAt) : null,
     },
   })
 }
 
-// Soft delete: trainer has active Boolean
+// Soft delete: trainer has active Boolean. Also removes associated User if present.
 export async function deleteTrainer(id: string) {
+  const trainer = await db.trainer.findFirst({ where: { id } })
+  if (trainer?.userId) {
+    const userId = trainer.userId
+    return db.$transaction(async (tx) => {
+      await tx.trainer.update({ where: { id }, data: { active: false, userId: null } })
+      await tx.user.delete({ where: { id: userId } })
+    })
+  }
   return db.trainer.update({ where: { id }, data: { active: false } })
+}
+
+export async function getTrainerProfileByUserId(userId: string) {
+  return db.trainer.findFirst({
+    where: { userId },
+    include: {
+      gym: { select: { id: true, name: true } },
+      groups: {
+        include: {
+          group: { select: { id: true, name: true } },
+          schedules: { select: { weekDay: true, startTime: true, endTime: true } },
+        },
+      },
+    },
+  })
+}
+
+export async function assignUserToTrainer(trainerId: string, email: string, password: string) {
+  const existing = await db.user.findUnique({ where: { email } })
+  if (existing) throw new Error("EMAIL_TAKEN")
+
+  const hashedPassword = await bcrypt.hash(password, 10)
+
+  await db.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: { email, hashedPassword, role: UserRole.TRAINER },
+    })
+    await tx.trainer.update({ where: { id: trainerId }, data: { userId: user.id } })
+  })
+
+  return { email, temporaryPassword: password }
+}
+
+export async function revokeUserFromTrainer(trainerId: string) {
+  const trainer = await db.trainer.findFirst({ where: { id: trainerId } })
+  if (!trainer?.userId) throw new Error("NO_USER")
+
+  const userId = trainer.userId
+
+  await db.$transaction(async (tx) => {
+    await tx.trainer.update({ where: { id: trainerId }, data: { userId: null } })
+    await tx.user.delete({ where: { id: userId } })
+  })
 }
 
 export type ScheduleConflict = {

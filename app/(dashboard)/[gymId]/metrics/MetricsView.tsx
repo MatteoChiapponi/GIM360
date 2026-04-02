@@ -2,8 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { SkeletonMetrics } from "@/components/ui/Skeleton"
-import { Input } from "@/components/ui/Input"
-import { Label } from "@/components/ui/Label"
 import { InfoTooltip } from "@/components/ui/InfoTooltip"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -24,7 +22,7 @@ type GroupMetrics = {
 type HealthIndexMetrics = {
   score: number
   label: "Saludable" | "En desarrollo" | "Con problemas" | "Crítico"
-  dim1Rentabilidad: { score: number; maxScore: number; weightedMarginPct: number }
+  dim1Rentabilidad: { score: number; maxScore: number; groupsAboveMargin: number; totalGroups: number }
   dim2Ocupacion: {
     score: number; maxScore: number; occupancyRate: number | null
     totalStudents: number; totalCapacity: number; hasGroupsWithoutCapacity: boolean
@@ -36,7 +34,7 @@ type HealthIndexMetrics = {
 type MetricView = "optimizacion" | "gimnasio" | "grupos"
 
 const VIEWS: { id: MetricView; label: string }[] = [
-  { id: "optimizacion", label: "Optimización" },
+  // { id: "optimizacion", label: "Optimización" }, // oculto temporalmente
   { id: "gimnasio", label: "Gimnasio" },
   { id: "grupos", label: "Grupos" },
 ]
@@ -151,6 +149,34 @@ function DimCard({ name, score, maxScore, metric, tooltip }: {
   )
 }
 
+function OccupancyCard({ occ }: { occ: HealthIndexMetrics["dim2Ocupacion"] }) {
+  const occPct = occ.occupancyRate != null ? Math.round(occ.occupancyRate * 100) : null
+  const color = occPct != null ? (occPct >= 80 ? "#10b981" : occPct >= 50 ? "#f59e0b" : "#ef4444") : "#A5A49D"
+  return (
+    <div className="rounded-xl border border-[#E5E4E0] bg-white px-5 py-4 space-y-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Ocupación general de grupos</p>
+      <div className="flex items-baseline gap-3">
+        {occPct != null ? (
+          <>
+            <span className="text-3xl font-bold font-mono" style={{ color }}>{occPct}%</span>
+            <span className="text-sm text-[#68685F]">{occ.totalStudents} de {occ.totalCapacity} lugares ocupados</span>
+          </>
+        ) : (
+          <span className="text-sm text-[#A5A49D]">Sin capacidad máxima configurada en los grupos</span>
+        )}
+      </div>
+      {occPct != null && (
+        <div className="h-2 w-full overflow-hidden rounded-full bg-[#F0EFEB]">
+          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.min(occPct, 100)}%`, backgroundColor: color }} />
+        </div>
+      )}
+      {occ.hasGroupsWithoutCapacity && (
+        <p className="text-xs text-[#A5A49D]">Algunos grupos no tienen capacidad máxima configurada y no se incluyen en este cálculo.</p>
+      )}
+    </div>
+  )
+}
+
 function HealthIndexView({ health: h }: { health: HealthIndexMetrics }) {
   const color = scoreColor(h.score)
   return (
@@ -178,8 +204,8 @@ function HealthIndexView({ health: h }: { health: HealthIndexMetrics }) {
           name="Rentabilidad"
           score={h.dim1Rentabilidad.score}
           maxScore={h.dim1Rentabilidad.maxScore}
-          metric={`Margen ponderado: ${Math.round(h.dim1Rentabilidad.weightedMarginPct * 100)}%`}
-          tooltip={`¿Cuánto queda de cada peso cobrado después de pagar a los profesores?\n\nUn margen alto significa que los grupos generan suficiente dinero para cubrir los sueldos y todavía sobra. Un margen bajo o negativo indica que los profesores cuestan más de lo que ingresa.\n\nSe pondera por ingresos: los grupos que más facturan tienen más peso en el resultado.\n\nPuntaje (máx. 35):\n≥ 50% de margen → 35 pts\n≥ 40% de margen → 25 pts\n≥ 30% de margen → 15 pts\n≥ 20% de margen → 5 pts\n< 20% de margen → 0 pts\n\nNiveles del puntaje total:\n80–100 → Saludable\n60–79 → En desarrollo\n40–59 → Con problemas\n0–39 → Crítico`}
+          metric={`Grupos con margen > 50%: ${h.dim1Rentabilidad.groupsAboveMargin} de ${h.dim1Rentabilidad.totalGroups}`}
+          tooltip={`¿Cuántos grupos generan un margen mayor al 50% después de pagar a los profesores?\n\nCada grupo que supera el 50% de margen suma 5 puntos. Los grupos por debajo no suman.\n\nPuntaje (máx. ${h.dim1Rentabilidad.maxScore}):\n5 pts por cada grupo con margen > 50%\n\nNiveles del puntaje total:\n80–100 → Saludable\n60–79 → En desarrollo\n40–59 → Con problemas\n0–39 → Crítico`}
         />
         <DimCard
           name="Ocupación"
@@ -190,21 +216,21 @@ function HealthIndexView({ health: h }: { health: HealthIndexMetrics }) {
               ? `Ocupación: ${Math.round(h.dim2Ocupacion.occupancyRate * 100)}% (${h.dim2Ocupacion.totalStudents} / ${h.dim2Ocupacion.totalCapacity} lugares)${h.dim2Ocupacion.hasGroupsWithoutCapacity ? " — algunos grupos sin capacidad" : ""}`
               : "Sin grupos con capacidad máxima configurada"
           }
-          tooltip={`¿Qué tan llenos están los grupos del gimnasio?\n\nCompara la cantidad de alumnos activos con la capacidad máxima de cada grupo. Un gimnasio con alta ocupación aprovecha mejor su infraestructura y sus profesores. Una ocupación baja significa que hay lugares disponibles que no generan ingresos.\n\nPuntaje (máx. 35):\n≥ 90% de ocupación → 35 pts\n~64% de ocupación → ~25 pts\n~45% de ocupación → ~17 pts\n~26% de ocupación → ~10 pts\n\nNiveles del puntaje total:\n80–100 → Saludable\n60–79 → En desarrollo\n40–59 → Con problemas\n0–39 → Crítico${h.dim2Ocupacion.hasGroupsWithoutCapacity ? "\n\nNota: los grupos sin capacidad máxima configurada no se incluyen en este cálculo." : ""}`}
+          tooltip={`¿Qué tan llenos están los grupos del gimnasio?\n\nCompara la cantidad de alumnos activos con la capacidad máxima de cada grupo.\n\nPuntaje (máx. 35):\n≥ 90% de ocupación → 35 pts\n75–90% → 25 pts\n60–75% → 15 pts\n50–60% → 5 pts\n< 50% → 0 pts\n\nNiveles del puntaje total:\n80–100 → Saludable\n60–79 → En desarrollo\n40–59 → Con problemas\n0–39 → Crítico${h.dim2Ocupacion.hasGroupsWithoutCapacity ? "\n\nNota: los grupos sin capacidad máxima configurada no se incluyen en este cálculo." : ""}`}
         />
         <DimCard
           name="Eficiencia de costos"
           score={h.dim3Eficiencia.score}
           maxScore={h.dim3Eficiencia.maxScore}
           metric={`Ratio de costos: ${Math.round(h.dim3Eficiencia.costRatio * 100)}% de lo cobrado`}
-          tooltip={`¿Qué parte de lo cobrado se va en gastos?\n\nSuma el costo de profesores más los gastos fijos (alquiler, servicios, etc.) y lo compara con el total cobrado. Un ratio bajo significa que el gimnasio gasta poco en relación a lo que ingresa — señal de buena eficiencia. Un ratio alto indica que casi todo lo que entra se va en costos.\n\nPuntaje (máx. 10):\n≤ 55% en costos → 10 pts\n~65% en costos → ~8 pts\n~78% en costos → ~5 pts\n≥ 100% en costos → 0 pts\n\nNiveles del puntaje total:\n80–100 → Saludable\n60–79 → En desarrollo\n40–59 → Con problemas\n0–39 → Crítico`}
+          tooltip={`¿Qué parte de lo cobrado se va en gastos?\n\nSuma el costo de profesores más los gastos fijos y lo compara con el total cobrado.\n\nPuntaje (máx. 10):\n< 50% en costos → 10 pts\n50–60% → 7 pts\n60–70% → 3 pts\n≥ 70% → 0 pts\n\nNiveles del puntaje total:\n80–100 → Saludable\n60–79 → En desarrollo\n40–59 → Con problemas\n0–39 → Crítico`}
         />
         <DimCard
           name="Ganancias"
           score={h.dim4Ganancias.score}
           maxScore={h.dim4Ganancias.maxScore}
           metric={`Margen de ganancia: ${Math.round(h.dim4Ganancias.ebitdaMargin * 100)}%`}
-          tooltip={`¿Qué queda realmente en el gimnasio al final del mes?\n\nEs la ganancia neta: lo cobrado menos los profesores y todos los gastos fijos. Si es positivo, el gimnasio genera dinero. Si es negativo, está perdiendo plata cada mes.\n\nPuntaje (máx. 20):\n≥ 30% de ganancia → 20 pts\n~20% de ganancia → ~13 pts\n~10% de ganancia → ~7 pts\n≤ 0% de ganancia → 0 pts\n\nNiveles del puntaje total:\n80–100 → Saludable\n60–79 → En desarrollo\n40–59 → Con problemas\n0–39 → Crítico`}
+          tooltip={`¿Qué queda realmente en el gimnasio al final del mes?\n\nEs la ganancia neta: lo cobrado menos los profesores y todos los gastos fijos.\n\nPuntaje (máx. 20):\n> 50% de ganancia → 20 pts\n40–50% → 15 pts\n30–40% → 10 pts\n20–30% → 5 pts\n< 20% → 0 pts\n\nNiveles del puntaje total:\n80–100 → Saludable\n60–79 → En desarrollo\n40–59 → Con problemas\n0–39 → Crítico`}
         />
       </div>
     </div>
@@ -393,33 +419,14 @@ function toYearMonth(d: Date) {
 }
 
 export default function MetricsView({ gymId }: { gymId: string }) {
-  const now = new Date()
-  const maxPeriod = toYearMonth(now)
-  const [period, setPeriod] = useState(maxPeriod)
-  const [minPeriod, setMinPeriod] = useState<string | undefined>(undefined)
-  const [activeView, setActiveView] = useState<MetricView>("optimizacion")
+  const period = toYearMonth(new Date())
+  const [activeView, setActiveView] = useState<MetricView>("gimnasio")
   const [healthMetrics, setHealthMetrics] = useState<HealthIndexMetrics | null>(null)
   const [gymMetrics, setGymMetrics] = useState<GymMetrics | null>(null)
   const [groupMetrics, setGroupMetrics] = useState<GroupMetrics[]>([])
   const [selectedGroup, setSelectedGroup] = useState<GroupMetrics | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const controller = new AbortController()
-    fetch(`/api/gyms/${gymId}`, { signal: controller.signal })
-      .then((r) => {
-        if (!r.ok) throw new Error("Error al cargar el gimnasio.")
-        return r.json()
-      })
-      .then((g) => {
-        if (g?.createdAt) setMinPeriod(toYearMonth(new Date(g.createdAt)))
-      })
-      .catch((err) => {
-        if (err instanceof Error && err.name === "AbortError") return
-      })
-    return () => controller.abort()
-  }, [gymId])
 
   const fetchMetrics = useCallback(async (signal?: AbortSignal) => {
     setLoading(true); setError(null)
@@ -446,8 +453,6 @@ export default function MetricsView({ gymId }: { gymId: string }) {
     return () => controller.abort()
   }, [fetchMetrics])
 
-  useEffect(() => { setSelectedGroup(null) }, [period])
-
   const totalRevenue = gymMetrics ? gymMetrics.totalCollectedRevenue + gymMetrics.totalPendingRevenue : 0
   const totalCosts = gymMetrics ? gymMetrics.totalTrainerCost + gymMetrics.totalFixedExpenses : 0
   const collectedPct = totalRevenue > 0 ? (gymMetrics?.totalCollectedRevenue ?? 0) / totalRevenue * 100 : 0
@@ -462,24 +467,13 @@ export default function MetricsView({ gymId }: { gymId: string }) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex items-baseline gap-3">
-            <h1 className="text-xl font-semibold text-[#111110]">Métricas</h1>
-            <span className="text-xl text-[#C8C7C3]">/</span>
-            <span className="text-xl font-semibold capitalize text-[#68685F]">{formatPeriod(period)}</span>
-          </div>
-          <p className="mt-0.5 text-sm text-[#A5A49D]">Rentabilidad y costos del gimnasio</p>
+      <div>
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-xl font-semibold text-[#111110]">Métricas</h1>
+          <span className="text-xl text-[#C8C7C3]">/</span>
+          <span className="text-xl font-semibold capitalize text-[#68685F]">{formatPeriod(period)}</span>
         </div>
-        <div className="flex items-center gap-2">
-          <Label htmlFor="period">Mes</Label>
-          <Input id="period" type="month" value={period} min={minPeriod} max={maxPeriod} onChange={(e) => {
-            let v = e.target.value
-            if (v > maxPeriod) v = maxPeriod
-            if (minPeriod && v < minPeriod) v = minPeriod
-            setPeriod(v)
-          }} className="py-2" />
-        </div>
+        <p className="mt-0.5 text-sm text-[#A5A49D]">Rentabilidad y costos del gimnasio</p>
       </div>
 
       {/* View selector */}
@@ -507,6 +501,26 @@ export default function MetricsView({ gymId }: { gymId: string }) {
           {/* ── GIMNASIO ── */}
           {activeView === "gimnasio" && (
             <div className="space-y-5">
+              {/* Puntaje de optimización */}
+              {healthMetrics && (
+                <div className="rounded-xl border border-[#E5E4E0] bg-white px-6 py-5 space-y-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Optimización del gimnasio</p>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                    <div className="flex items-baseline gap-3">
+                      <span className="text-5xl font-bold font-mono" style={{ color: scoreColor(healthMetrics.score) }}>{healthMetrics.score}</span>
+                      <span className="text-2xl text-[#A5A49D] font-mono">/ 100</span>
+                      <InfoTooltip text={`Puntaje de salud financiera del gimnasio (0–100).\n\nMétricas consideradas:\n• Rentabilidad de grupos\n• Ocupación\n• Ganancias netas\n• Eficiencia de costos`} />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="inline-block rounded-full px-3 py-0.5 text-xs font-semibold text-white w-fit" style={{ backgroundColor: scoreColor(healthMetrics.score) }}>
+                        {healthMetrics.label}
+                      </span>
+                      <p className="text-sm text-[#68685F] max-w-sm">{labelDescription(healthMetrics.label)}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Hero: Ganancia del mes */}
               <MetricCard
                 size="hero"
@@ -569,12 +583,19 @@ export default function MetricsView({ gymId }: { gymId: string }) {
 
           {/* ── GRUPOS ── */}
           {activeView === "grupos" && (
-            <div>
+            <div className="space-y-5">
               {selectedGroup ? (
                 <GroupDetailView group={selectedGroup} onBack={() => setSelectedGroup(null)} />
-              ) : groupMetrics.length === 0 ? (
-                <p className="text-sm text-[#A5A49D]">No hay grupos en este gimnasio.</p>
               ) : (
+                <>
+                  {/* Ocupación general */}
+                  {healthMetrics && (
+                    <OccupancyCard occ={healthMetrics.dim2Ocupacion} />
+                  )}
+
+                  {groupMetrics.length === 0 ? (
+                    <p className="text-sm text-[#A5A49D]">No hay grupos en este gimnasio.</p>
+                  ) : (
                 <div className="overflow-x-auto rounded-xl border border-[#E5E4E0] bg-white">
                   <table className="w-full min-w-[640px] text-sm">
                     <thead>
@@ -644,6 +665,8 @@ export default function MetricsView({ gymId }: { gymId: string }) {
                     </tfoot>
                   </table>
                 </div>
+                  )}
+                </>
               )}
             </div>
           )}

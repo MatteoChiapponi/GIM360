@@ -20,6 +20,16 @@ export default auth((req) => {
     if (role !== "ADMIN" && isAdminRoute) {
       return NextResponse.redirect(new URL("/dashboard", req.url))
     }
+
+    const isTrainerRoute = req.nextUrl.pathname.startsWith("/trainer")
+
+    if (role === "TRAINER" && !isTrainerRoute) {
+      return NextResponse.redirect(new URL("/trainer", req.url))
+    }
+
+    if (role !== "TRAINER" && isTrainerRoute) {
+      return NextResponse.redirect(new URL("/dashboard", req.url))
+    }
   }
 })
 

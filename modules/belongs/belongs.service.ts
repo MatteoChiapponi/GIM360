@@ -76,3 +76,17 @@ export async function cashClosingBelongsToGym(closingId: string, gymId: string):
   const closing = await db.cashClosing.findFirst({ where: { id: closingId, gymId } })
   return !!closing
 }
+
+/** Verifica si el registro de asistencia pertenece al gimnasio */
+export async function attendanceBelongsToGym(attendanceId: string, gymId: string): Promise<boolean> {
+  const record = await db.attendance.findFirst({ where: { id: attendanceId, gymId } })
+  return !!record
+}
+
+/** Verifica si el trainer tiene acceso al registro de asistencia (via asignación al grupo) */
+export async function trainerCanAccessAttendance(trainerId: string, attendanceId: string): Promise<boolean> {
+  const attendance = await db.attendance.findFirst({ where: { id: attendanceId } })
+  if (!attendance) return false
+  const link = await db.trainerGroup.findFirst({ where: { trainerId, groupId: attendance.groupId } })
+  return !!link
+}

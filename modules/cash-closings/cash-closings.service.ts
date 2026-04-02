@@ -2,7 +2,8 @@ import { db } from "@/lib/db"
 
 interface CreateCashClosingInput {
   gymId: string
-  notes?: string
+  notes?: string | null
+  excludedPaymentIds?: string[]
 }
 
 /**
@@ -13,7 +14,12 @@ interface CreateCashClosingInput {
 export async function createCashClosing(input: CreateCashClosingInput) {
   return db.$transaction(async (tx) => {
     const paidPayments = await tx.payment.findMany({
-      where: { gymId: input.gymId, verified: false, status: "PAID" },
+      where: {
+        gymId: input.gymId,
+        verified: false,
+        status: "PAID",
+        ...(input.excludedPaymentIds?.length ? { id: { notIn: input.excludedPaymentIds } } : {}),
+      },
       orderBy: { paidAt: "asc" },
     })
 
@@ -79,6 +85,32 @@ export async function getCashClosingsByGym(gymId: string) {
   return db.cashClosing.findMany({
     where: { gymId },
     orderBy: { closedAt: "desc" },
+  })
+}
+
+/**
+ * Undoes the most recent cash closing for a gym.
+ * Removes the closing record and resets all its payments to unverified (cashClosingId = null, verified = false).
+ */
+export async function undoLastCashClosing(gymId: string) {
+  return db.$transaction(async (tx) => {
+    const lastClosing = await tx.cashClosing.findFirst({
+      where: { gymId },
+      orderBy: { closedAt: "desc" },
+    })
+
+    if (!lastClosing) {
+      throw new Error("No hay cierres de caja para deshacer")
+    }
+
+    await tx.payment.updateMany({
+      where: { cashClosingId: lastClosing.id },
+      data: { verified: false, cashClosingId: null },
+    })
+
+    await tx.cashClosing.delete({ where: { id: lastClosing.id } })
+
+    return lastClosing
   })
 }
 

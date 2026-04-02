@@ -26,7 +26,7 @@ export function InfoTooltip({ text }: { text: string }) {
       PADDING + TOOLTIP_WIDTH / 2,
       Math.min(rawLeft, window.innerWidth - PADDING - TOOLTIP_WIDTH / 2)
     )
-    setPos({ top: rect.bottom + 8, left: clampedLeft, above: false, ready: false })
+    setPos({ top: rect.bottom + 4, left: clampedLeft, above: false, ready: false })
   }, [visible])
 
   // Pass 2: after tooltip renders, measure actual height and decide above/below
@@ -34,9 +34,9 @@ export function InfoTooltip({ text }: { text: string }) {
     if (!pos || pos.ready || !triggerRef.current || !tooltipRef.current) return
     const rect = triggerRef.current.getBoundingClientRect()
     const tooltipHeight = tooltipRef.current.offsetHeight
-    const spaceBelow = window.innerHeight - rect.bottom - 8
-    const above = spaceBelow < tooltipHeight + 8
-    const top = above ? rect.top - tooltipHeight - 8 : rect.bottom + 8
+    const spaceBelow = window.innerHeight - rect.bottom - 4
+    const above = spaceBelow < tooltipHeight + 4
+    const top = above ? rect.top - tooltipHeight - 4 : rect.bottom + 4
     setPos(p => p ? { ...p, top, above, ready: true } : null)
   }, [pos])
 
@@ -70,6 +70,8 @@ export function InfoTooltip({ text }: { text: string }) {
       {visible && pos && createPortal(
         <div
           ref={tooltipRef}
+          onMouseEnter={() => setHover(true)}
+          onMouseLeave={() => setHover(false)}
           style={{
             position: "fixed",
             top: pos.top,

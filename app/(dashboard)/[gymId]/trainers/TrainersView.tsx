@@ -34,6 +34,7 @@ type Trainer = {
   name: string
   active: boolean
   startedAt: string | null
+  userId: string | null
   groups: TrainerGroupAssignment[]
 }
 
@@ -101,6 +102,8 @@ export default function TrainersView({ gymId }: { gymId: string }) {
   const [form, setForm] = useState<{ name: string; startedAt: string }>({ name: "", startedAt: "" })
   const [assignForm, setAssignForm] = useState<GroupAssignForm>(EMPTY_ASSIGN)
   const [showGroupSection, setShowGroupSection] = useState(false)
+  const [showCredSection, setShowCredSection] = useState(false)
+  const [createCredForm, setCreateCredForm] = useState({ email: "", password: "", confirmPassword: "" })
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [gymGroups, setGymGroups] = useState<GymGroup[]>([])
@@ -131,6 +134,14 @@ export default function TrainersView({ gymId }: { gymId: string }) {
 
   // Deactivate
   const [confirmId, setConfirmId] = useState<string | null>(null)
+
+  // Credentials
+  type CredModalState = { trainerId: string; mode: "assign" | "revoke" } | null
+  const [credModal, setCredModal] = useState<CredModalState>(null)
+  const [credForm, setCredForm] = useState({ email: "", password: "", confirmPassword: "" })
+  const [credSubmitting, setCredSubmitting] = useState(false)
+  const [credError, setCredError] = useState<string | null>(null)
+  const [newCredentials, setNewCredentials] = useState<{ email: string; temporaryPassword: string } | null>(null)
 
   const [search, setSearch] = useState("")
   type SortKey = "name" | "groups" | "pay"
@@ -199,6 +210,16 @@ export default function TrainersView({ gymId }: { gymId: string }) {
       }
     }
 
+    // Validate credentials if section is open
+    if (showCredSection && createCredForm.email) {
+      if (createCredForm.password.length < 8) {
+        setFormError("La contraseña debe tener al menos 8 caracteres."); return
+      }
+      if (createCredForm.password !== createCredForm.confirmPassword) {
+        setFormError("Las contraseñas no coinciden."); return
+      }
+    }
+
     setSubmitting(true)
     const createBody: Record<string, unknown> = { gymId, name: form.name.trim() }
     if (form.startedAt) createBody.startedAt = new Date(form.startedAt).toISOString()
@@ -235,8 +256,60 @@ export default function TrainersView({ gymId }: { gymId: string }) {
       }
     }
 
-    setForm({ name: "", startedAt: "" }); setAssignForm(EMPTY_ASSIGN); setShowGroupSection(false); setShowForm(false); await refetch()
+    // Optional: assign credentials
+    if (showCredSection && createCredForm.email) {
+      const credRes = await fetch(`/api/trainers/${created.id}/user?gymId=${gymId}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: createCredForm.email, password: createCredForm.password }),
+      })
+      if (credRes.ok) {
+        const credData = await credRes.json()
+        setNewCredentials(credData)
+      } else {
+        const d = await credRes.json().catch(() => ({}))
+        setFormError(d?.error ?? "Entrenador creado, pero no se pudo asignar el acceso.")
+        setSubmitting(false)
+        await refetch()
+        return
+      }
+    }
+
+    setForm({ name: "", startedAt: "" }); setAssignForm(EMPTY_ASSIGN); setShowGroupSection(false)
+    setCreateCredForm({ email: "", password: "", confirmPassword: "" }); setShowCredSection(false)
+    setShowForm(false); await refetch()
     setSubmitting(false)
+  }
+
+  async function handleAssignCredentials(e: React.FormEvent) {
+    e.preventDefault()
+    if (!credModal) return
+    setCredError(null)
+    if (credForm.password !== credForm.confirmPassword) {
+      setCredError("Las contraseñas no coinciden."); return
+    }
+    setCredSubmitting(true)
+    const res = await fetch(`/api/trainers/${credModal.trainerId}/user?gymId=${gymId}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: credForm.email, password: credForm.password }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      setCredModal(null)
+      setCredForm({ email: "", password: "", confirmPassword: "" })
+      setNewCredentials(data)
+      await refetch()
+    } else {
+      const d = await res.json().catch(() => ({}))
+      setCredError(d?.error ?? "No se pudo asignar el acceso.")
+    }
+    setCredSubmitting(false)
+  }
+
+  async function handleRevokeCredentials() {
+    if (!credModal) return
+    const res = await fetch(`/api/trainers/${credModal.trainerId}/user?gymId=${gymId}`, { method: "DELETE" })
+    if (res.ok) { setCredModal(null); await refetch() }
+    else { const d = await res.json().catch(() => ({})); setCredError(d?.error ?? "No se pudo revocar el acceso.") }
   }
 
   function openDetail(t: Trainer) {
@@ -275,7 +348,7 @@ export default function TrainersView({ gymId }: { gymId: string }) {
       body: JSON.stringify(patchBody),
     })
     if (res.ok) { setShowEditModal(false); await refetch() }
-    else { const d = await res.json().catch(() => ({})); setEditError(d?.error ?? "No se pudo actualizar el entrenador.") }
+    else { const d = await res.json().catch(() => ({})); setEditError(typeof d?.error === "string" ? d.error : "No se pudo actualizar el entrenador.") }
     setEditSubmitting(false)
   }
 
@@ -325,7 +398,7 @@ export default function TrainersView({ gymId }: { gymId: string }) {
         error={formError}
         onSubmit={handleCreate}
         submitting={submitting}
-        onCancel={() => { setShowForm(false); setForm({ name: "", startedAt: "" }); setAssignForm(EMPTY_ASSIGN); setShowGroupSection(false); setFormError(null) }}
+        onCancel={() => { setShowForm(false); setForm({ name: "", startedAt: "" }); setAssignForm(EMPTY_ASSIGN); setShowGroupSection(false); setCreateCredForm({ email: "", password: "", confirmPassword: "" }); setShowCredSection(false); setFormError(null) }}
         gridCols="sm:grid-cols-1"
       >
         <FormField label="Nombre" required>
@@ -334,6 +407,31 @@ export default function TrainersView({ gymId }: { gymId: string }) {
         <FormField label="Fecha de inicio">
           <Input type="date" value={form.startedAt} onChange={(e) => setForm((f) => ({ ...f, startedAt: e.target.value }))} />
         </FormField>
+
+        {/* ── Optional credentials ── */}
+        <div className="border-t border-[#F0EFEB] pt-3">
+          <button
+            type="button"
+            onClick={() => { setShowCredSection((v) => !v); if (showCredSection) setCreateCredForm({ email: "", password: "", confirmPassword: "" }) }}
+            className="cursor-pointer text-xs font-medium text-[#68685F] hover:text-[#111110] transition-colors"
+          >
+            {showCredSection ? "− Cancelar acceso al sistema" : "+ Asignar acceso al sistema (opcional)"}
+          </button>
+          {showCredSection && (
+            <div className="mt-3 space-y-4">
+              <FormField label="Email" required>
+                <Input type="email" value={createCredForm.email} onChange={(e) => setCreateCredForm((f) => ({ ...f, email: e.target.value }))} placeholder="entrenador@email.com" />
+              </FormField>
+              <FormField label="Contraseña (mínimo 8 caracteres)" required>
+                <Input type="text" value={createCredForm.password} onChange={(e) => setCreateCredForm((f) => ({ ...f, password: e.target.value }))} placeholder="Mínimo 8 caracteres" />
+              </FormField>
+              <FormField label="Confirmar contraseña" required>
+                <Input type="text" value={createCredForm.confirmPassword} onChange={(e) => setCreateCredForm((f) => ({ ...f, confirmPassword: e.target.value }))} placeholder="Repetí la contraseña" />
+              </FormField>
+              <p className="text-xs text-[#68685F]">La contraseña se mostrará una sola vez al crear el entrenador.</p>
+            </div>
+          )}
+        </div>
 
         {/* ── Optional group assignment ── */}
         <div className="border-t border-[#F0EFEB] pt-3">
@@ -476,10 +574,34 @@ export default function TrainersView({ gymId }: { gymId: string }) {
 
             <div className="px-6 py-5 space-y-6">
               {/* ── Actions ──────────────────────────────────────────────── */}
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <Button variant="secondary" onClick={startEdit}>Editar</Button>
                 {selectedTrainer.active && (
                   <Button variant="danger" onClick={() => setConfirmId(selectedTrainer.id)}>Desactivar</Button>
+                )}
+              </div>
+
+              {/* ── Acceso ───────────────────────────────────────────────── */}
+              <div className="rounded-lg border border-[#E5E4E0] bg-[#FAFAF9] px-4 py-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Acceso al sistema</span>
+                  {selectedTrainer.userId ? (
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                      Activo
+                    </span>
+                  ) : (
+                    <span className="text-xs text-[#A5A49D]">Sin acceso</span>
+                  )}
+                </div>
+                {selectedTrainer.userId ? (
+                  <Button variant="danger" onClick={() => { setCredError(null); setCredModal({ trainerId: selectedTrainer.id, mode: "revoke" }) }}>
+                    Revocar acceso
+                  </Button>
+                ) : (
+                  <Button variant="secondary" onClick={() => { setCredForm({ email: "", password: "", confirmPassword: "" }); setCredError(null); setCredModal({ trainerId: selectedTrainer.id, mode: "assign" }) }}>
+                    Asignar acceso
+                  </Button>
                 )}
               </div>
 
@@ -594,6 +716,63 @@ export default function TrainersView({ gymId }: { gymId: string }) {
         confirmLabel="Desactivar"
         onConfirm={() => { const id = confirmId!; setConfirmId(null); handleDeactivate(id) }}
         onCancel={() => setConfirmId(null)}
+      />
+
+      {/* ─── Assign credentials modal ─────────────────────────────────────── */}
+      <FormModal
+        open={credModal?.mode === "assign"}
+        title="Asignar acceso al entrenador"
+        error={credError}
+        onSubmit={handleAssignCredentials}
+        submitting={credSubmitting}
+        onCancel={() => { setCredModal(null); setCredForm({ email: "", password: "", confirmPassword: "" }); setCredError(null) }}
+        gridCols="sm:grid-cols-1"
+        submitLabel="Crear acceso"
+      >
+        <FormField label="Email" required>
+          <Input type="email" value={credForm.email} onChange={(e) => setCredForm((f) => ({ ...f, email: e.target.value }))} placeholder="entrenador@email.com" />
+        </FormField>
+        <FormField label="Contraseña (mínimo 8 caracteres)" required>
+          <Input type="text" value={credForm.password} onChange={(e) => setCredForm((f) => ({ ...f, password: e.target.value }))} placeholder="Mínimo 8 caracteres" />
+        </FormField>
+        <FormField label="Confirmar contraseña" required>
+          <Input type="text" value={credForm.confirmPassword} onChange={(e) => setCredForm((f) => ({ ...f, confirmPassword: e.target.value }))} placeholder="Repetí la contraseña" />
+        </FormField>
+        <p className="text-xs text-[#68685F]">La contraseña se mostrará una sola vez. Compartila con el entrenador.</p>
+      </FormModal>
+
+      {/* ─── Show credentials once ────────────────────────────────────────── */}
+      {newCredentials && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/20" onClick={() => setNewCredentials(null)} />
+          <div className="relative w-full max-w-sm rounded-2xl bg-white shadow-xl border border-[#E5E4E0] p-6 space-y-4">
+            <div>
+              <h2 className="text-base font-semibold text-[#111110]">Acceso creado</h2>
+              <p className="text-xs text-[#68685F] mt-1">Guardá estas credenciales antes de cerrar. No se volverán a mostrar.</p>
+            </div>
+            <div className="rounded-lg border border-[#E5E4E0] bg-[#F7F6F3] px-4 py-3 space-y-2 font-mono text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[#A5A49D] text-xs font-sans">Email</span>
+                <span className="text-[#111110] truncate">{newCredentials.email}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[#A5A49D] text-xs font-sans">Contraseña</span>
+                <span className="text-[#111110]">{newCredentials.temporaryPassword}</span>
+              </div>
+            </div>
+            <Button onClick={() => setNewCredentials(null)} className="w-full">Entendido</Button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Revoke credentials confirm ───────────────────────────────────── */}
+      <ConfirmDialog
+        open={credModal?.mode === "revoke"}
+        title="Revocar acceso"
+        message="El entrenador ya no podrá iniciar sesión. Podés asignarle un nuevo acceso cuando quieras."
+        confirmLabel="Revocar"
+        onConfirm={handleRevokeCredentials}
+        onCancel={() => setCredModal(null)}
       />
     </div>
   )

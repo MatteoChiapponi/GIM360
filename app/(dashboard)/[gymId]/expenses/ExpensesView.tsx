@@ -80,7 +80,7 @@ export default function ExpensesView({ gymId }: { gymId: string }) {
       body: JSON.stringify({ name: editForm.name.trim(), amount: Number(editForm.amount) }),
     })
     if (res.ok) { setEditingId(null); await refetch() }
-    else { const d = await res.json().catch(() => ({})); setEditError(d?.error ?? "No se pudo actualizar el gasto.") }
+    else { const d = await res.json().catch(() => ({})); setEditError(typeof d?.error === "string" ? d.error : "No se pudo actualizar el gasto.") }
     setEditSubmitting(false)
   }
 

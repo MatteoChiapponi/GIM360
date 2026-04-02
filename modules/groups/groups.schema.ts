@@ -5,7 +5,7 @@ export const createGroupSchema = z.object({
   gymId: z.string().min(1),
   name: z.string().min(1),
   monthlyPrice: z.number().positive().multipleOf(0.01),
-  maxCapacity: z.number().int().positive().optional(),
+  maxCapacity: z.number().int().positive().nullable().optional(),
 })
 
 export const updateGroupSchema = createGroupSchema.omit({ gymId: true }).partial()

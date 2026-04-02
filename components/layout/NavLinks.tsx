@@ -10,12 +10,13 @@ export function NavLinks({ gymId }: { gymId: string }) {
   const ref = useRef<HTMLDivElement>(null)
 
   const items = [
-    { label: "Grupos",       href: `/${gymId}/groups` },
-    { label: "Alumnos",      href: `/${gymId}/students` },
-    { label: "Entrenadores", href: `/${gymId}/trainers` },
-    { label: "Cuotas",       href: `/${gymId}/payments` },
-    { label: "Gastos",       href: `/${gymId}/expenses` },
-    { label: "Métricas",     href: `/${gymId}/metrics` },
+    { label: "Grupos",        href: `/${gymId}/groups` },
+    { label: "Alumnos",       href: `/${gymId}/students` },
+    { label: "Entrenadores",  href: `/${gymId}/trainers` },
+    { label: "Asistencias",   href: `/${gymId}/attendance` },
+    { label: "Cuotas",        href: `/${gymId}/payments` },
+    { label: "Gastos",        href: `/${gymId}/expenses` },
+    { label: "Métricas",      href: `/${gymId}/metrics` },
   ]
 
   // Cerrar al hacer click fuera

@@ -9,7 +9,7 @@ export const createScheduleSchema = z.object({
   startTime: z.string().regex(timeRegex, "Format HH:MM required"),
   endTime: z.string().regex(timeRegex, "Format HH:MM required"),
   startDate: z.string().datetime(),
-  endDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().nullable().optional(),
 })
 
 export const updateScheduleSchema = createScheduleSchema.omit({ groupId: true }).partial()

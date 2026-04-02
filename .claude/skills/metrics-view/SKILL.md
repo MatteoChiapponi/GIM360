@@ -24,25 +24,65 @@ const maxPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,
 Los tabs representan **secciones del backend** (un endpoint = un tab). Están definidos en el array `VIEWS`:
 
 ```ts
-type MetricView = "general" | "gimnasio" | "grupos"  // extender al agregar secciones
+type MetricView = "optimizacion" | "gimnasio" | "grupos"  // extender al agregar secciones
 
 const VIEWS: { id: MetricView; label: string }[] = [
-  { id: "general",  label: "General" },   // overview combinado — SIEMPRE el primero
-  { id: "gimnasio", label: "Gimnasio" },  // → /api/metrics/gym
-  { id: "grupos",   label: "Grupos" },    // → /api/metrics/groups
+  { id: "optimizacion", label: "Optimización" },  // índice de salud 0-100 — SIEMPRE el primero
+  { id: "gimnasio",     label: "Gimnasio" },       // → /api/metrics/gym
+  { id: "grupos",       label: "Grupos" },         // → /api/metrics/groups
   // agregar aquí al crear nuevos endpoints
 ]
 ```
 
-El tab activo por defecto es `"general"`.
+El tab activo por defecto es `"optimizacion"`.
 
 ## Secciones actuales
 
 | Tab | Endpoint | Datos que muestra |
 |---|---|---|
-| **General** | todos | EBITDA hero, cards ingresos/costos, barra de cobro, lista compacta de grupos con margen |
+| **Optimización** | `/api/metrics/health` | Índice de salud 0–100 con 4 dimensiones (ver abajo) |
 | **Gimnasio** | `/api/metrics/gym` | 5 stat cards (cobrado, pendiente, entrenadores, fijos, EBITDA) + barra de progreso |
 | **Grupos** | `/api/metrics/groups` | Tabla completa con ocupación, precios, ingresos, costos y margen por grupo |
+
+## Índice de salud — reglas de scoring
+
+Servicio: `modules/metrics/health/health-metrics.service.ts`
+Tipo exportado: `HealthIndexMetrics`
+
+### Dim 1 — Rentabilidad (max variable = grupos × 5)
+- +5 pts por cada grupo con margen > 50% (ingresos − costo entrenadores) / ingresos
+- Grupos sin ingresos ese mes no cuentan
+- `maxScore = totalGroups * 5`
+
+### Dim 2 — Ocupación (max 35)
+- Se evalúa el grupo con **peor ocupación** (todos deben cumplir la condición)
+- ≥ 90% → 35 pts
+- 75–90% → 25 pts
+- 60–75% → 15 pts
+- 50–60% → 5 pts
+- < 50% → 0 pts
+- Grupos sin `maxCapacity` configurada se excluyen del cálculo
+
+### Dim 3 — Eficiencia de costos (max 10)
+- `costRatio = (costo entrenadores + gastos fijos) / cobrado`
+- < 50% → 10 pts
+- 50–60% → 7 pts
+- 60–70% → 3 pts
+- ≥ 70% → 0 pts
+
+### Dim 4 — Ganancias / ingresos (max 20)
+- `ebitdaMargin = (cobrado − entrenadores − gastos fijos) / cobrado`
+- > 50% → 20 pts
+- 40–50% → 15 pts
+- 30–40% → 10 pts
+- 20–30% → 5 pts
+- < 20% → 0 pts
+
+### Labels del score total
+- 80–100 → Saludable
+- 60–79 → En desarrollo
+- 40–59 → Con problemas
+- 0–39 → Crítico
 
 ## Cómo agregar una nueva sección (checklist)
 

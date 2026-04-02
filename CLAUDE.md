@@ -205,3 +205,46 @@ export async function POST(req: NextRequest) {
 - **New protected pages**: place under `app/(dashboard)/` — `proxy.ts` covers them automatically
 - **New public routes**: place under `app/(auth)/` or add the path to the proxy matcher exclusions
 - **UI components**: `components/ui/` for generic components, `components/layout/` for Sidebar/Navbar
+
+### Logging — OBLIGATORIO en todo route handler
+
+**Regla**: Todo código backend que se escriba o modifique DEBE incluir logs con `logger` de `@/lib/logger`.
+
+```ts
+import { logger } from "@/lib/logger"
+```
+
+El wrapper `withAuth`/`withAuthParams` ya cubre automáticamente: 401, 403 de auth, inicio de request, status final y duración. Lo que hay que agregar en cada handler:
+
+| Caso | Método | Campos mínimos |
+|------|--------|----------------|
+| Param requerido faltante (400) | `logger.warn` | nombre del param |
+| Validación Zod falla (400) | `logger.warn` | `{ errors: parsed.error.flatten() }` |
+| `gymBelongsToOwner` → false (403) | `logger.warn` | `{ gymId, userId: session.user.id }` |
+| `<x>BelongsTo<y>` → false (403) | `logger.warn` | IDs relevantes |
+| `gymIsActive` → false (403) | `logger.warn` | `{ gymId }` |
+| Recurso no encontrado (404) | `logger.warn` | `{ id }` + nombre del recurso |
+| Mutación exitosa — POST (201) | `logger.info` | `{ id: result.id }` |
+| Mutación exitosa — PATCH (200) | `logger.info` | `{ id }` |
+| Mutación exitosa — DELETE (204) | `logger.info` | `{ id }` |
+| Error en catch | `logger.error` | `{ error: String(err), ...ids }` |
+
+**GET (reads)**: no requieren `logger.info` en éxito — el wrapper ya loguea `← GET /path 200`.
+
+Ejemplo completo:
+```ts
+export const POST = withAuth([UserRole.OWNER], async (req, session) => {
+  const body = await req.json()
+  const parsed = createStudentSchema.safeParse(body)
+  if (!parsed.success) {
+    logger.warn("Validation error", { errors: parsed.error.flatten() })
+    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
+  }
+  if (!await gymBelongsToOwner(parsed.data.gymId, session.user.id)) {
+    logger.warn("gymBelongsToOwner failed", { gymId: parsed.data.gymId, userId: session.user.id })
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+  const student = await createStudent(parsed.data)
+  logger.info("Student created", { id: student.id })
+  return NextResponse.json(student, { status: 201 })
+})

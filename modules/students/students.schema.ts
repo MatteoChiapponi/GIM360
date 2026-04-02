@@ -13,14 +13,14 @@ export const createStudentSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   dueDay: z.number().int().min(1).max(31).optional(),
-  birthDate: z.string().datetime().optional(),
-  nationalId: z.string().optional(),
+  birthDate: z.string().datetime().nullable().optional(),
+  nationalId: z.string().nullable().optional(),
   phone1: phoneSchema,
-  phone2: phoneSchema.optional(),
-  emergencyPhone: phoneSchema.optional(),
-  emergencyContact: z.string().optional(),
+  phone2: phoneSchema.nullable().optional(),
+  emergencyPhone: phoneSchema.nullable().optional(),
+  emergencyContact: z.string().nullable().optional(),
   status: z.nativeEnum(StudentStatus).optional(),
-  trialEndsAt: z.string().datetime().optional(),
+  trialEndsAt: z.string().datetime().nullable().optional(),
 })
 
 export const updateStudentSchema = createStudentSchema.omit({ gymId: true }).partial()

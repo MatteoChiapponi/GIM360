@@ -96,6 +96,7 @@ model Gym {
   payments      Payment[]
   cashClosings  CashClosing[]
   studentFiles  StudentFile[]
+  attendances   Attendance[]
 
   @@index([ownerId])
 }
@@ -114,7 +115,7 @@ model FixedExpense {
 model Trainer {
   id           String       @id @default(cuid())
   userId       String?      @unique
-  user         User?        @relation(fields: [userId], references: [id])
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
   gymId        String
   gym          Gym          @relation(fields: [gymId], references: [id], onDelete: Cascade)
   name         String
@@ -162,9 +163,10 @@ model Group {
   maxCapacity  Int?
   createdAt    DateTime @default(now())
 
-  trainers  TrainerGroup[]
-  students  StudentGroup[]
-  schedules Schedule[]
+  trainers    TrainerGroup[]
+  students    StudentGroup[]
+  schedules   Schedule[]
+  attendances Attendance[]
 
   @@index([gymId])
 }
@@ -228,7 +230,7 @@ model Payment {
   gymId         String
   gym           Gym            @relation(fields: [gymId], references: [id], onDelete: Cascade)
   studentId     String
-  student       Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student       Student        @relation(fields: [studentId], references: [id], onDelete: Restrict)
   period        DateTime       // first day of the month: 2026-04-01T00:00:00Z
   amount        Decimal        @db.Decimal(10, 2)
   status        PaymentStatus  @default(PENDING)
@@ -283,4 +285,21 @@ model CashClosing {
   payments Payment[]
 
   @@index([gymId])
+}
+
+model Attendance {
+  id            String   @id @default(cuid())
+  gymId         String
+  gym           Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  groupId       String
+  group         Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  date          DateTime
+  detail        Json?
+  takenByUserId String?
+  takenByName   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([groupId, date])
+  @@index([gymId, date])
 }

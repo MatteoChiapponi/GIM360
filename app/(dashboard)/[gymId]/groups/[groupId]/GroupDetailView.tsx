@@ -186,7 +186,7 @@ function InfoTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     })
     if (res.ok) { setShowEditModal(false); await onRefresh() }
-    else { const d = await res.json().catch(() => ({})); setEditError(d?.error ?? "Error al guardar.") }
+    else { const d = await res.json().catch(() => ({})); setEditError(typeof d?.error === "string" ? d.error : "Error al guardar.") }
     setSubmitting(false)
   }
 
@@ -1226,7 +1226,7 @@ function TrainersTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
           setOverlapConflicts(d.conflicts)
           setPendingOverlapAction("edit")
         } else {
-          setEditError(d?.error ?? "Error al actualizar el entrenador.")
+          setEditError(typeof d?.error === "string" ? d.error : "Error al actualizar el entrenador.")
         }
       }
     } catch { setEditError("Error de red.") }

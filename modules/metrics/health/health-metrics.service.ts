@@ -27,7 +27,7 @@ type HealthLabel = "Saludable" | "En desarrollo" | "Con problemas" | "Crítico"
 export type HealthIndexMetrics = {
   score: number
   label: HealthLabel
-  dim1Rentabilidad: { score: number; maxScore: number; weightedMarginPct: number }
+  dim1Rentabilidad: { score: number; maxScore: number; groupsAboveMargin: number; totalGroups: number }
   dim2Ocupacion: {
     score: number
     maxScore: number
@@ -137,27 +137,18 @@ export async function getHealthIndexMetrics(input: MetricsQueryInput): Promise<H
   const totalFixedExpenses = fixedExpenses.reduce((s, fe) => s + Number(fe.amount), 0)
   const ebitda = totalCollectedRevenue - totalTrainerCost - totalFixedExpenses
 
-  // ── Dim 1 — Rentabilidad (max 35) ────────────────────────────────────────────
-  let dim1Score = 0
-  let weightedMarginPct = 0
-
-  if (totalCollectedRevenue > 0) {
-    const weightedSum = groupFigures.reduce((sum, g) => {
-      if (g.collectedRevenue <= 0) return sum
-      const marginPct = (g.collectedRevenue - g.trainerCost) / g.collectedRevenue
-      return sum + marginPct * g.collectedRevenue
-    }, 0)
-    weightedMarginPct = weightedSum / totalCollectedRevenue
-
-    if (weightedMarginPct >= 0.5) dim1Score = 35
-    else if (weightedMarginPct >= 0.4) dim1Score = 25
-    else if (weightedMarginPct >= 0.3) dim1Score = 15
-    else if (weightedMarginPct >= 0.2) dim1Score = 5
-    else dim1Score = 0
-  }
+  // ── Dim 1 — Rentabilidad: 5 pts por cada grupo con margen > 50% ──────────────
+  const groupsWithRevenue = groupFigures.filter((g) => g.collectedRevenue > 0)
+  const groupsAboveMargin = groupsWithRevenue.filter(
+    (g) => (g.collectedRevenue - g.trainerCost) / g.collectedRevenue > 0.5,
+  ).length
+  const totalGroups = groupsWithRevenue.length
+  const dim1Score = groupsAboveMargin * 5
+  const dim1MaxScore = totalGroups * 5
 
   // ── Dim 2 — Ocupación (max 35) ───────────────────────────────────────────────
-  const groupsWithCapacity = groupFigures.filter((g) => g.maxCapacity !== null)
+  // El puntaje lo determina el grupo con PEOR ocupación (todos deben cumplir la condición).
+  const groupsWithCapacity = groupFigures.filter((g) => g.maxCapacity !== null && g.maxCapacity > 0)
   const hasGroupsWithoutCapacity = groupFigures.length > groupsWithCapacity.length
 
   let dim2Score = 0
@@ -165,29 +156,45 @@ export async function getHealthIndexMetrics(input: MetricsQueryInput): Promise<H
   const totalStudents = groupsWithCapacity.reduce((s, g) => s + g.activeStudents, 0)
   const totalCapacity = groupsWithCapacity.reduce((s, g) => s + (g.maxCapacity ?? 0), 0)
 
-  if (groupsWithCapacity.length > 0 && totalCapacity > 0) {
+  if (groupsWithCapacity.length > 0) {
+    // Tasa de ocupación global (para mostrar en UI)
     occupancyRate = totalStudents / totalCapacity
-    dim2Score = Math.round(Math.min(occupancyRate / 0.9, 1) * 35)
+
+    // Peor ocupación individual entre los grupos con capacidad configurada
+    const minOccupancy = Math.min(
+      ...groupsWithCapacity.map((g) => g.activeStudents / (g.maxCapacity ?? 1)),
+    )
+
+    if (minOccupancy >= 0.9) dim2Score = 35
+    else if (minOccupancy >= 0.75) dim2Score = 25
+    else if (minOccupancy >= 0.6) dim2Score = 15
+    else if (minOccupancy >= 0.5) dim2Score = 5
+    else dim2Score = 0
   }
 
-  // ── Dim 3 — Eficiencia de costos (max 20) ────────────────────────────────────
+  // ── Dim 3 — Eficiencia de costos (max 10) ────────────────────────────────────
   let dim3Score = 0
   let costRatio = 0
 
   if (totalCollectedRevenue > 0) {
     costRatio = (totalTrainerCost + totalFixedExpenses) / totalCollectedRevenue
-    dim3Score = Math.max(0, Math.min(Math.round(((1 - costRatio) / (1 - 0.55)) * 10), 10))
+    if (costRatio < 0.5) dim3Score = 10
+    else if (costRatio < 0.6) dim3Score = 7
+    else if (costRatio < 0.7) dim3Score = 3
+    else dim3Score = 0
   }
 
-  // ── Dim 4 — Ganancias / EBITDA (max 20) ──────────────────────────────────────
+  // ── Dim 4 — Ganancias / ingresos (max 20) ────────────────────────────────────
   let dim4Score = 0
   let ebitdaMargin = 0
 
   if (totalCollectedRevenue > 0) {
     ebitdaMargin = ebitda / totalCollectedRevenue
-    if (ebitdaMargin > 0) {
-      dim4Score = Math.max(0, Math.min(Math.round((ebitdaMargin / 0.3) * 20), 20))
-    }
+    if (ebitdaMargin > 0.5) dim4Score = 20
+    else if (ebitdaMargin >= 0.4) dim4Score = 15
+    else if (ebitdaMargin >= 0.3) dim4Score = 10
+    else if (ebitdaMargin >= 0.2) dim4Score = 5
+    else dim4Score = 0
   }
 
   const score = dim1Score + dim2Score + dim3Score + dim4Score
@@ -195,7 +202,7 @@ export async function getHealthIndexMetrics(input: MetricsQueryInput): Promise<H
   return {
     score,
     label: getLabel(score),
-    dim1Rentabilidad: { score: dim1Score, maxScore: 35, weightedMarginPct },
+    dim1Rentabilidad: { score: dim1Score, maxScore: dim1MaxScore, groupsAboveMargin, totalGroups },
     dim2Ocupacion: {
       score: dim2Score,
       maxScore: 35,

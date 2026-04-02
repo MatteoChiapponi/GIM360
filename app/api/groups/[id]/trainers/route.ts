@@ -5,6 +5,7 @@ import { gymBelongsToOwner, groupBelongsToGym, trainerBelongsToGym } from "@/mod
 import { assignTrainer, getGroupById } from "@/modules/groups/groups.service"
 import { assignTrainerSchema } from "@/modules/groups/groups.schema"
 import { getTrainerScheduleConflicts } from "@/modules/trainers/trainers.service"
+import { logger } from "@/lib/logger"
 
 type Params = { id: string }
 
@@ -15,25 +16,40 @@ const DAY_ES: Record<string, string> = {
 
 export const POST = withAuthParams<Params>([UserRole.OWNER], async (req, session, { id: groupId }) => {
   const gymId = req.nextUrl.searchParams.get("gymId")
-  if (!gymId) return NextResponse.json({ error: "gymId required" }, { status: 400 })
+  if (!gymId) {
+    logger.warn("Missing required param: gymId")
+    return NextResponse.json({ error: "gymId required" }, { status: 400 })
+  }
 
-  if (!await gymBelongsToOwner(gymId, session.user.id))
+  if (!await gymBelongsToOwner(gymId, session.user.id)) {
+    logger.warn("gymBelongsToOwner failed", { gymId, userId: session.user.id })
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
 
-  if (!await groupBelongsToGym(groupId, gymId))
+  if (!await groupBelongsToGym(groupId, gymId)) {
+    logger.warn("groupBelongsToGym failed", { groupId, gymId })
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
 
   const body = await req.json()
   const forceOverlap = body.forceOverlap === true
   const parsed = assignTrainerSchema.safeParse(body)
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
+  if (!parsed.success) {
+    logger.warn("Validation error", { errors: parsed.error.flatten() })
+    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
+  }
 
-  if (!await trainerBelongsToGym(parsed.data.trainerId, gymId))
+  if (!await trainerBelongsToGym(parsed.data.trainerId, gymId)) {
+    logger.warn("trainerBelongsToGym failed", { trainerId: parsed.data.trainerId, gymId })
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
 
   // Validate trainer schedule entries against group schedules
   const group = await getGroupById(groupId)
-  if (!group) return NextResponse.json({ error: "Grupo no encontrado" }, { status: 404 })
+  if (!group) {
+    logger.warn("Group not found", { id: groupId })
+    return NextResponse.json({ error: "Grupo no encontrado" }, { status: 404 })
+  }
 
   const groupWeekDays = new Set(group.schedules.flatMap((s) => s.weekDays))
 
@@ -70,5 +86,7 @@ export const POST = withAuthParams<Params>([UserRole.OWNER], async (req, session
     }
   }
 
-  return NextResponse.json(await assignTrainer(groupId, parsed.data), { status: 201 })
+  const result = await assignTrainer(groupId, parsed.data)
+  logger.info("Trainer assigned to group", { trainerId: parsed.data.trainerId, groupId })
+  return NextResponse.json(result, { status: 201 })
 })

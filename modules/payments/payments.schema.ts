@@ -8,9 +8,9 @@ export const generatePaymentsSchema = z.object({
 
 export const updatePaymentSchema = z.object({
   status: z.nativeEnum(PaymentStatus).optional(),
-  paymentMethod: z.nativeEnum(PaymentMethod).optional(),
-  paidAt: z.string().datetime().optional(),
-  notes: z.string().optional(),
+  paymentMethod: z.nativeEnum(PaymentMethod).nullable().optional(),
+  paidAt: z.string().datetime().nullable().optional(),
+  notes: z.string().nullable().optional(),
   amount: z.number().positive().multipleOf(0.01).optional(),
 })
 

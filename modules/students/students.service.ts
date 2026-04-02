@@ -31,8 +31,8 @@ export async function createStudent(data: CreateStudentInput) {
   return db.student.create({
     data: {
       ...data,
-      birthDate: data.birthDate ? new Date(data.birthDate) : undefined,
-      trialEndsAt: data.trialEndsAt ? new Date(data.trialEndsAt) : undefined,
+      birthDate: data.birthDate ? new Date(data.birthDate) : null,
+      trialEndsAt: data.trialEndsAt ? new Date(data.trialEndsAt) : null,
     },
   })
 }
@@ -42,8 +42,8 @@ export async function updateStudent(id: string, data: UpdateStudentInput) {
     where: { id },
     data: {
       ...data,
-      birthDate: data.birthDate ? new Date(data.birthDate) : undefined,
-      trialEndsAt: data.trialEndsAt ? new Date(data.trialEndsAt) : undefined,
+      birthDate: data.birthDate === undefined ? undefined : data.birthDate ? new Date(data.birthDate) : null,
+      trialEndsAt: data.trialEndsAt === undefined ? undefined : data.trialEndsAt ? new Date(data.trialEndsAt) : null,
     },
   })
 }

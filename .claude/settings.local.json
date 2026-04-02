@@ -6,7 +6,9 @@
       "Bash(npm install zod)",
       "Bash(ls:*)",
       "Bash(npx tsc --noEmit 2>&1)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(ls /c/Users/nicoc/Desktop/GYM360/GIM360/app/\"\\(dashboard\\)\"/\"[gymId]\")",
+      "Bash(ls /c/Users/nicoc/Desktop/GYM360/GIM360/app/\"\\(dashboard\\)\"/\"[gymId]\"/trainers/)"
     ]
   }
 }

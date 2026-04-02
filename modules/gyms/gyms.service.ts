@@ -25,3 +25,7 @@ export async function updateGym(id: string, data: UpdateGymInput) {
 export async function deleteGym(id: string) {
   return db.gym.delete({ where: { id } })
 }
+
+export async function getOwnerByUserId(userId: string) {
+  return db.owner.findFirst({ where: { userId }, select: { id: true, name: true } })
+}

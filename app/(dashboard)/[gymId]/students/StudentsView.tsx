@@ -320,7 +320,8 @@ export default function StudentsView({ gymId }: { gymId: string }) {
       setSelectedDetail(updated)
     } else {
       const d = await res.json().catch(() => ({}))
-      setEditError(d?.error ?? "No se pudo actualizar el alumno.")
+      const err = d?.error
+      setEditError(typeof err === "string" ? err : "No se pudo actualizar el alumno.")
     }
     setEditSubmitting(false)
   }
