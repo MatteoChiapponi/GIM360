@@ -1,19 +1,19 @@
 import { NextResponse } from "next/server"
 import { UserRole } from "@/app/generated/prisma/client"
 import { withAuthParams } from "@/lib/with-auth"
-import { gymBelongsToOwner } from "@/modules/belongs/belongs.service"
+import { gymBelongsToOwner, gymBelongsToUser } from "@/modules/belongs/belongs.service"
 import { updateGymSchema } from "@/modules/gyms/gyms.schema"
 import { getGymById, updateGym, deleteGym } from "@/modules/gyms/gyms.service"
 import { logger } from "@/lib/logger"
 
-export const GET = withAuthParams<{ id: string }>([UserRole.OWNER], async (_req, session, { id }) => {
+export const GET = withAuthParams<{ id: string }>([UserRole.OWNER, UserRole.RECEPTIONIST], async (_req, session, { id }) => {
   const gym = await getGymById(id)
   if (!gym) {
     logger.warn("Gym not found", { id })
     return NextResponse.json({ error: "Not found" }, { status: 404 })
   }
-  if (!await gymBelongsToOwner(gym.id, session.user.id)) {
-    logger.warn("gymBelongsToOwner failed", { gymId: gym.id, userId: session.user.id })
+  if (!await gymBelongsToUser(gym.id, session.user.id)) {
+    logger.warn("gymBelongsToUser failed", { gymId: gym.id, userId: session.user.id })
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
   return NextResponse.json(gym)

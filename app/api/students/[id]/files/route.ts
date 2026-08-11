@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { UserRole } from "@/app/generated/prisma/client"
 import { withAuthParams } from "@/lib/with-auth"
-import { gymBelongsToOwner, studentBelongsToGym } from "@/modules/belongs/belongs.service"
+import { gymBelongsToUser, studentBelongsToGym } from "@/modules/belongs/belongs.service"
 import { getFilesByStudent, createStudentFile } from "@/modules/students/files/student-files.service"
 import { uploadFileSchema, ALLOWED_MIME_TYPES, MAX_FILE_SIZE_BYTES } from "@/modules/students/files/student-files.schema"
 import { supabaseAdmin, STUDENT_FILES_BUCKET } from "@/lib/supabase-admin"
@@ -9,15 +9,15 @@ import { logger } from "@/lib/logger"
 
 type Params = { id: string }
 
-export const GET = withAuthParams<Params>([UserRole.OWNER], async (req, session, { id }) => {
+export const GET = withAuthParams<Params>([UserRole.OWNER, UserRole.RECEPTIONIST], async (req, session, { id }) => {
   const gymId = req.nextUrl.searchParams.get("gymId")
   if (!gymId) {
     logger.warn("Missing required param: gymId")
     return NextResponse.json({ error: "gymId required" }, { status: 400 })
   }
 
-  if (!await gymBelongsToOwner(gymId, session.user.id)) {
-    logger.warn("gymBelongsToOwner failed", { gymId, userId: session.user.id })
+  if (!await gymBelongsToUser(gymId, session.user.id)) {
+    logger.warn("gymBelongsToUser failed", { gymId, userId: session.user.id })
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
@@ -40,7 +40,7 @@ export const GET = withAuthParams<Params>([UserRole.OWNER], async (req, session,
   return NextResponse.json(filesWithUrls)
 })
 
-export const POST = withAuthParams<Params>([UserRole.OWNER], async (req, session, { id }) => {
+export const POST = withAuthParams<Params>([UserRole.OWNER, UserRole.RECEPTIONIST], async (req, session, { id }) => {
   const formData = await req.formData()
 
   const gymId = formData.get("gymId")
@@ -68,8 +68,8 @@ export const POST = withAuthParams<Params>([UserRole.OWNER], async (req, session
     return NextResponse.json({ error: "El archivo supera el límite de 10 MB." }, { status: 400 })
   }
 
-  if (!await gymBelongsToOwner(parsed.data.gymId, session.user.id)) {
-    logger.warn("gymBelongsToOwner failed", { gymId: parsed.data.gymId, userId: session.user.id })
+  if (!await gymBelongsToUser(parsed.data.gymId, session.user.id)) {
+    logger.warn("gymBelongsToUser failed", { gymId: parsed.data.gymId, userId: session.user.id })
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

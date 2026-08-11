@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { UserRole } from "@/app/generated/prisma/client"
 import { withAuth } from "@/lib/with-auth"
-import { gymBelongsToOwner, gymIsActive, studentBelongsToGym } from "@/modules/belongs/belongs.service"
+import { gymBelongsToUser, gymIsActive, studentBelongsToGym } from "@/modules/belongs/belongs.service"
 import { generateMonthlyPayments, getPaymentsByGym, getPaymentsByStudent } from "@/modules/payments/payments.service"
 import { generatePaymentsSchema } from "@/modules/payments/payments.schema"
 import { logger } from "@/lib/logger"
@@ -16,8 +16,8 @@ export const GET = withAuth([UserRole.OWNER, UserRole.RECEPTIONIST], async (req,
     return NextResponse.json({ error: "gymId required" }, { status: 400 })
   }
 
-  if (!await gymBelongsToOwner(gymId, session.user.id)) {
-    logger.warn("gymBelongsToOwner failed", { gymId, userId: session.user.id })
+  if (!await gymBelongsToUser(gymId, session.user.id)) {
+    logger.warn("gymBelongsToUser failed", { gymId, userId: session.user.id })
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
@@ -53,8 +53,8 @@ export const POST = withAuth([UserRole.OWNER, UserRole.RECEPTIONIST], async (req
 
   const { gymId, period } = parsed.data
 
-  if (!await gymBelongsToOwner(gymId, session.user.id)) {
-    logger.warn("gymBelongsToOwner failed", { gymId, userId: session.user.id })
+  if (!await gymBelongsToUser(gymId, session.user.id)) {
+    logger.warn("gymBelongsToUser failed", { gymId, userId: session.user.id })
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

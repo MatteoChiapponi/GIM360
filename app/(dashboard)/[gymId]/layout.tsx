@@ -1,9 +1,10 @@
 import { auth } from "@/lib/auth"
 import { redirect } from "next/navigation"
-import { gymBelongsToOwner, gymIsActive } from "@/modules/belongs/belongs.service"
+import { gymBelongsToOwner, gymBelongsToReceptionist, gymIsActive } from "@/modules/belongs/belongs.service"
 import { db } from "@/lib/db"
 import Link from "next/link"
 import { NavLinks } from "@/components/layout/NavLinks"
+import { LogoutButton } from "@/components/layout/LogoutButton"
 
 export default async function GymLayout({
   children,
@@ -17,8 +18,19 @@ export default async function GymLayout({
 
   const { gymId } = await params
 
-  if (!await gymBelongsToOwner(gymId, session.user.id)) redirect("/dashboard")
-  if (!await gymIsActive(gymId)) redirect("/dashboard")
+  const role = session.user.role
+  const isReceptionist = role === "RECEPTIONIST"
+
+  // El recepcionista no tiene /dashboard — vuelve siempre a /reception, que le
+  // explica qué pasó en vez de rebotarlo a una ruta que el proxy le devuelve acá.
+  const noAccessRoute = isReceptionist ? "/reception" : "/dashboard"
+
+  const hasAccess = isReceptionist
+    ? await gymBelongsToReceptionist(gymId, session.user.id)
+    : await gymBelongsToOwner(gymId, session.user.id)
+
+  if (!hasAccess) redirect(noAccessRoute)
+  if (!await gymIsActive(gymId)) redirect(noAccessRoute)
 
   const gym = await db.gym.findUnique({ where: { id: gymId }, select: { name: true } })
 
@@ -31,7 +43,7 @@ export default async function GymLayout({
           <div className="h-14 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
               <Link
-                href="/dashboard"
+                href={isReceptionist ? `/${gymId}/students` : "/dashboard"}
                 className="text-xs font-semibold tracking-[0.2em] uppercase text-[#111110]"
               >
                 GYM360
@@ -45,14 +57,18 @@ export default async function GymLayout({
             </div>
 
             {/* Nav links — desktop inline / mobile hamburger (handled inside NavLinks) */}
-            <NavLinks gymId={gymId} />
+            <NavLinks gymId={gymId} role={role} />
 
-            <Link
-              href="/dashboard"
-              className="text-xs font-medium text-[#A5A49D] hover:text-[#111110] transition-colors flex-shrink-0 min-h-[44px] flex items-center"
-            >
-              ← Volver
-            </Link>
+            {isReceptionist ? (
+              <LogoutButton />
+            ) : (
+              <Link
+                href="/dashboard"
+                className="text-xs font-medium text-[#A5A49D] hover:text-[#111110] transition-colors flex-shrink-0 min-h-[44px] flex items-center"
+              >
+                ← Volver
+              </Link>
+            )}
           </div>
 
         </div>

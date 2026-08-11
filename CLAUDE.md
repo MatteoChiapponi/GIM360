@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev       # Start dev server (http://localhost:3000)
 npm run build     # Production build (also runs type check)
 npm run lint      # ESLint
+npm test          # Vitest (una pasada)
+npm run test:watch
 npx tsc --noEmit  # Type check only
 
 # Prisma (always run after schema changes)
@@ -18,6 +20,7 @@ npx prisma studio            # GUI for the DB
 
 # Seed
 npx tsx scripts/seed.ts      # Insert test owner (admin@gym360.com / admin1234)
+npx tsx scripts/seed-dev.ts  # Dev dataset: 2 gyms + recepcionista (recepcion@gym360.com / recepcion1234)
 ```
 
 After any change to `prisma/schema.prisma`, run `prisma migrate dev` then `prisma generate` before building.
@@ -31,14 +34,20 @@ After any change to `prisma/schema.prisma`, run `prisma migrate dev` then `prism
 El control de acceso se hace con métodos explícitos en `modules/belongs/belongs.service.ts`. Cada método recibe dos IDs y retorna `Promise<boolean>`.
 
 ```ts
-gymBelongsToOwner(gymId, userId)         // gym.owner.userId === userId
-trainerBelongsToGym(trainerId, gymId)    // trainer.gymId === gymId
-studentBelongsToGym(studentId, gymId)    // student.gymId === gymId
-groupBelongsToGym(groupId, gymId)        // group.gymId === gymId
+gymBelongsToOwner(gymId, userId)          // gym.owner.userId === userId
+gymBelongsToReceptionist(gymId, userId)   // receptionist activo de ese gym
+gymBelongsToUser(gymId, userId)           // cualquier rol: owner | trainer | receptionist activo
+trainerBelongsToGym(trainerId, gymId)     // trainer.gymId === gymId
+receptionistBelongsToGym(receptionistId, gymId)
+studentBelongsToGym(studentId, gymId)     // student.gymId === gymId
+groupBelongsToGym(groupId, gymId)         // group.gymId === gymId
 scheduleBelongsToGroup(scheduleId, groupId)
 trainerBelongsToGroup(trainerId, groupId)
 studentBelongsToGroup(studentId, groupId)
 ```
+
+En handlers que aceptan más de un rol (ej. `[OWNER, RECEPTIONIST]`), el belongs va con
+`gymBelongsToUser` — el gate de rol ya lo hizo `withAuth`, así que no puede colarse un rol de más.
 
 **Los servicios NO verifican pertenencia** — son acceso a datos puro. La verificación siempre va en el route handler, antes de llamar al servicio:
 
@@ -71,7 +80,9 @@ if (session.user.role === "TRAINER") {
 | `lib/auth.ts` | NextAuth config — authorize logic with bcrypt, JWT/session callbacks propagate `id` and `role` |
 | `lib/db.ts` | Prisma singleton — uses `PrismaPg` adapter; `DATABASE_URL` must be set |
 | `lib/utils.ts` | `cn()` helper (clsx + tailwind-merge) |
-| `proxy.ts` | Route guard — unauthenticated requests redirect to `/login` |
+| `proxy.ts` | Route guard — sin sesión → `/login`; con sesión, manda cada rol a su área |
+| `lib/guards.ts` | `requireGymRole(gymId, roles)` — guard de rol para páginas de `/[gymId]` |
+| `lib/with-auth.ts` | `withAuth(roles, handler)` / `withAuthParams` — auth + rol + logging del request |
 | `prisma/schema.prisma` | All DB models and enums |
 | `prisma.config.ts` | Loads `.env.local` (override) then `.env`; passes `DATABASE_URL` to Prisma CLI |
 | `types/next-auth.d.ts` | Extends `Session` type to include `user.id` and `user.role` |
@@ -80,28 +91,82 @@ if (session.user.role === "TRAINER") {
 ### Data model
 ```
 User (auth)
- └── Owner 1:1
-      └── Gym[]
-           ├── Trainer[]       (optional User 1:1 — trainer may not have login)
-           ├── Student[]
-           ├── Group[]
-           │    ├── TrainerGroup[]  (junction, includes precioHora)
-           │    ├── StudentGroup[]  (junction, includes fechaInscripcion)
-           │    └── Schedule[]      (diasSemana: DayOfWeek[], horaInicio/Fin: "HH:MM")
-           └── FixedExpense[]
+ ├── Owner 1:1
+ │    └── Gym[]
+ │         ├── Trainer[]       (optional User 1:1 — trainer may not have login)
+ │         ├── Receptionist[]  (required User 1:1 — only exists to log in)
+ │         ├── Student[]
+ │         ├── Group[]
+ │         │    ├── TrainerGroup[]  (junction, includes hourlyRate)
+ │         │    │    └── TrainerGroupSchedule[]
+ │         │    ├── StudentGroup[]  (junction, includes enrolledAt)
+ │         │    ├── Schedule[]      (weekDays: DayOfWeek[], startTime/endTime: "HH:MM")
+ │         │    └── Attendance[]
+ │         ├── Payment[]  ── CashClosing[]
+ │         ├── StudentFile[]
+ │         └── FixedExpense[]
+ ├── Trainer 1:1  (optional)
+ └── Receptionist 1:1  (optional)
 ```
 
+### Roles
+| Rol | Perfil | Cómo se crea | Alcance |
+|---|---|---|---|
+| `ADMIN` | ninguno | manualmente en la DB | plataforma: `/admin`, `/api/admin/*` |
+| `OWNER` | `Owner` 1:1 | `POST /api/admin/owners` | sus gimnasios, todo el área `/[gymId]` |
+| `TRAINER` | `Trainer` 1:1 opcional | `POST /api/trainers/:id/user` | `/trainer` — sus grupos y asistencias |
+| `RECEPTIONIST` | `Receptionist` 1:1 requerido | `POST /api/receptionists` | un gimnasio: alumnos, asistencias y cuotas |
+
+**RECEPTIONIST** — pertenece a un solo gimnasio (`Receptionist.gymId`) y comparte las vistas de
+`/[gymId]`, con la nav recortada a Alumnos / Asistencias / Cuotas (`RECEPTIONIST_SECTIONS` en
+`components/layout/NavLinks.tsx`). Puede hacer CRUD de alumnos (incluidas fichas y apto médico),
+inscribirlos en grupos, generar las cuotas del mes y registrar pagos, y cargar asistencias.
+Quedan fuera: cierres de caja, gastos, métricas, grupos y entrenadores. `active: false` corta el
+acceso sin borrar el registro; `DELETE` borra el `User` y arrastra al `Receptionist` por cascade.
+
 ### Enums (in schema.prisma)
-- `UserRole`: `OWNER | TRAINER | RECEPTIONIST`
-- `GymStatus`: `ACTIVO | INACTIVO | SUSPENDIDO`
-- `ContractType`: `POR_HORA | MENSUAL`
-- `MedicalClearance`: `PENDIENTE | APROBADO | VENCIDO`
-- `DayOfWeek`: `LUNES | MARTES | MIERCOLES | JUEVES | VIERNES | SABADO | DOMINGO`
+- `UserRole`: `ADMIN | OWNER | TRAINER | RECEPTIONIST`
+- `GymStatus`: `ACTIVE | INACTIVE | SUSPENDED`
+- `StudentStatus`: `ACTIVE | INACTIVE | TRIAL`
+- `PaymentStatus`: `PENDING | PAID | EXPIRED`
+- `PaymentMethod`: `CASH | TRANSFER | CARD`
+- `StudentFileType`: `FICHA | APTO_MEDICO`
+- `DayOfWeek`: `MONDAY | TUESDAY | WEDNESDAY | THURSDAY | FRIDAY | SATURDAY | SUNDAY`
 
 ### Route groups
 - `app/(auth)/` — public routes (`/login`)
-- `app/(dashboard)/` — protected routes (`/dashboard`). Sidebar/Navbar to be added to layout.
+- `app/(dashboard)/` — protected routes. Entradas por rol: `/dashboard` (owner), `/admin`,
+  `/trainer`, `/reception`. El área `/[gymId]` la comparten owner y recepcionista.
 - `app/api/auth/[...nextauth]/` — NextAuth handler, do not modify.
+
+### Tests (Vitest, `tests/`)
+
+No hay DB en los tests: `tests/mocks/db.ts` es un fake de Prisma que implementa `findFirst` /
+`findMany` sobre arrays en memoria. Los `belongs` corren **de verdad** contra ese fixture, así que
+los tests de acceso cubren la cadena rol → belongs → handler y no una versión mockeada de sí misma.
+Lo que sí se mockea: `@/lib/auth` (la sesión), `@/lib/logger` y los servicios de dominio.
+
+| Archivo | Qué fija |
+|---|---|
+| `tests/api-access.test.ts` | Matriz de acceso sobre los route handlers reales: qué toca cada rol, aislamiento entre gimnasios, recepcionista desactivado, sin sesión |
+| `tests/belongs.test.ts` | Los predicados de autorización, incluido `active: false` |
+| `tests/role-routing.test.ts` | Ruteo por rol del proxy + invariante de que ningún redirect encadena otro |
+| `tests/guards.test.ts` | `requireGymRole` y su fallback por rol |
+| `tests/receptionists.service.test.ts` | Alta transaccional, email duplicado, hash de contraseña, borrado por cascade |
+
+Al agregar un endpoint que acepte más de un rol, sumalo al catálogo de `api-access.test.ts`: las
+listas `RECEPTIONIST_ALLOWED` / `RECEPTIONIST_DENIED` son la definición ejecutable de los permisos.
+
+### Guards de página
+`proxy.ts` solo mira el rol del JWT (corre en edge, sin DB): manda cada rol a su entrada y bloquea
+las áreas ajenas. Lo que necesita DB va en server components:
+- `app/(dashboard)/[gymId]/layout.tsx` — pertenencia al gimnasio (`gymBelongsToOwner` /
+  `gymBelongsToReceptionist`) y `gymIsActive`. Al recepcionista lo devuelve a `/reception`, no a
+  `/dashboard` — si no, el proxy lo rebota acá en loop.
+- `requireGymRole(gymId, roles)` de `lib/guards.ts` — en cada `page.tsx` de `/[gymId]`, para
+  separar las secciones del owner de las compartidas.
+- `app/(dashboard)/reception/page.tsx` — única pantalla terminal del recepcionista: lo manda a su
+  gimnasio, o explica por qué no puede entrar (acceso desactivado / gimnasio suspendido).
 
 ### Env vars (`.env.local`)
 ```
@@ -133,6 +198,7 @@ modules/                    ← Business logic, one folder per domain
     gyms.schema.ts          ← Zod input validation + inferred types
   students/
   trainers/
+  receptionists/
   groups/
   schedules/
 
@@ -143,6 +209,7 @@ app/api/                    ← HTTP layer only (thin controllers)
     [id]/route.ts           ← GET, PATCH, DELETE /api/gyms/:id
   students/
   trainers/
+  receptionists/
   groups/
   schedules/
 
