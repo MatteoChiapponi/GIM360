@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev       # Start dev server (http://localhost:3000)
 npm run build     # Production build (also runs type check)
 npm run lint      # ESLint
+npm test          # Vitest (una pasada)
+npm run test:watch
 npx tsc --noEmit  # Type check only
 
 # Prisma (always run after schema changes)
@@ -136,6 +138,24 @@ acceso sin borrar el registro; `DELETE` borra el `User` y arrastra al `Reception
 - `app/(dashboard)/` — protected routes. Entradas por rol: `/dashboard` (owner), `/admin`,
   `/trainer`, `/reception`. El área `/[gymId]` la comparten owner y recepcionista.
 - `app/api/auth/[...nextauth]/` — NextAuth handler, do not modify.
+
+### Tests (Vitest, `tests/`)
+
+No hay DB en los tests: `tests/mocks/db.ts` es un fake de Prisma que implementa `findFirst` /
+`findMany` sobre arrays en memoria. Los `belongs` corren **de verdad** contra ese fixture, así que
+los tests de acceso cubren la cadena rol → belongs → handler y no una versión mockeada de sí misma.
+Lo que sí se mockea: `@/lib/auth` (la sesión), `@/lib/logger` y los servicios de dominio.
+
+| Archivo | Qué fija |
+|---|---|
+| `tests/api-access.test.ts` | Matriz de acceso sobre los route handlers reales: qué toca cada rol, aislamiento entre gimnasios, recepcionista desactivado, sin sesión |
+| `tests/belongs.test.ts` | Los predicados de autorización, incluido `active: false` |
+| `tests/role-routing.test.ts` | Ruteo por rol del proxy + invariante de que ningún redirect encadena otro |
+| `tests/guards.test.ts` | `requireGymRole` y su fallback por rol |
+| `tests/receptionists.service.test.ts` | Alta transaccional, email duplicado, hash de contraseña, borrado por cascade |
+
+Al agregar un endpoint que acepte más de un rol, sumalo al catálogo de `api-access.test.ts`: las
+listas `RECEPTIONIST_ALLOWED` / `RECEPTIONIST_DENIED` son la definición ejecutable de los permisos.
 
 ### Guards de página
 `proxy.ts` solo mira el rol del JWT (corre en edge, sin DB): manda cada rol a su entrada y bloquea

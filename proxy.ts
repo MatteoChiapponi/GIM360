@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth"
 import { NextResponse } from "next/server"
+import { resolveRoleRedirect } from "@/lib/role-routing"
 
 export default auth((req) => {
   const isLoggedIn = !!req.auth
@@ -11,36 +12,11 @@ export default auth((req) => {
 
   if (isLoggedIn) {
     const role = req.auth?.user?.role
-    const isAdminRoute = req.nextUrl.pathname.startsWith("/admin")
+    if (!role) return
 
-    if (role === "ADMIN" && !isAdminRoute) {
-      return NextResponse.redirect(new URL("/admin", req.url))
-    }
-
-    if (role !== "ADMIN" && isAdminRoute) {
-      return NextResponse.redirect(new URL("/dashboard", req.url))
-    }
-
-    const isTrainerRoute = req.nextUrl.pathname.startsWith("/trainer")
-
-    if (role === "TRAINER" && !isTrainerRoute) {
-      return NextResponse.redirect(new URL("/trainer", req.url))
-    }
-
-    if (role !== "TRAINER" && isTrainerRoute) {
-      return NextResponse.redirect(new URL("/dashboard", req.url))
-    }
-
-    // El recepcionista no tiene selector de gimnasios: /reception lo manda al suyo.
-    const isReceptionRoute = req.nextUrl.pathname.startsWith("/reception")
-    const isGymPicker = req.nextUrl.pathname === "/" || req.nextUrl.pathname === "/dashboard"
-
-    if (role === "RECEPTIONIST" && isGymPicker) {
-      return NextResponse.redirect(new URL("/reception", req.url))
-    }
-
-    if (role !== "RECEPTIONIST" && isReceptionRoute) {
-      return NextResponse.redirect(new URL("/dashboard", req.url))
+    const redirectTo = resolveRoleRedirect(role, req.nextUrl.pathname)
+    if (redirectTo) {
+      return NextResponse.redirect(new URL(redirectTo, req.url))
     }
   }
 })
