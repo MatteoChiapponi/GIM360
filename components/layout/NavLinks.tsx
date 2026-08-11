@@ -4,20 +4,28 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState, useEffect, useRef } from "react"
 
-export function NavLinks({ gymId }: { gymId: string }) {
+/** Secciones que ve el recepcionista. El resto de /[gymId] es solo del owner. */
+const RECEPTIONIST_SECTIONS = ["students", "attendance", "payments"]
+
+export function NavLinks({ gymId, role }: { gymId: string; role?: string }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  const items = [
-    { label: "Grupos",        href: `/${gymId}/groups` },
-    { label: "Alumnos",       href: `/${gymId}/students` },
-    { label: "Entrenadores",  href: `/${gymId}/trainers` },
-    { label: "Asistencias",   href: `/${gymId}/attendance` },
-    { label: "Cuotas",        href: `/${gymId}/payments` },
-    { label: "Gastos",        href: `/${gymId}/expenses` },
-    { label: "Métricas",      href: `/${gymId}/metrics` },
+  const allItems = [
+    { section: "groups",        label: "Grupos",        href: `/${gymId}/groups` },
+    { section: "students",      label: "Alumnos",       href: `/${gymId}/students` },
+    { section: "trainers",      label: "Entrenadores",  href: `/${gymId}/trainers` },
+    { section: "receptionists", label: "Recepción",     href: `/${gymId}/receptionists` },
+    { section: "attendance",    label: "Asistencias",   href: `/${gymId}/attendance` },
+    { section: "payments",      label: "Cuotas",        href: `/${gymId}/payments` },
+    { section: "expenses",      label: "Gastos",        href: `/${gymId}/expenses` },
+    { section: "metrics",       label: "Métricas",      href: `/${gymId}/metrics` },
   ]
+
+  const items = role === "RECEPTIONIST"
+    ? allItems.filter((i) => RECEPTIONIST_SECTIONS.includes(i.section))
+    : allItems
 
   // Cerrar al hacer click fuera
   useEffect(() => {

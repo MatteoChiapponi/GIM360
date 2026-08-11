@@ -1,22 +1,22 @@
 import { NextResponse } from "next/server"
 import { UserRole } from "@/app/generated/prisma/client"
 import { withAuthParams } from "@/lib/with-auth"
-import { gymBelongsToOwner, studentBelongsToGym } from "@/modules/belongs/belongs.service"
+import { gymBelongsToUser, studentBelongsToGym } from "@/modules/belongs/belongs.service"
 import { getStudentFileById } from "@/modules/students/files/student-files.service"
 import { supabaseAdmin, STUDENT_FILES_BUCKET } from "@/lib/supabase-admin"
 import { logger } from "@/lib/logger"
 
 type Params = { id: string; fileId: string }
 
-export const GET = withAuthParams<Params>([UserRole.OWNER], async (req, session, { id, fileId }) => {
+export const GET = withAuthParams<Params>([UserRole.OWNER, UserRole.RECEPTIONIST], async (req, session, { id, fileId }) => {
   const gymId = req.nextUrl.searchParams.get("gymId")
   if (!gymId) {
     logger.warn("Missing required param: gymId")
     return NextResponse.json({ error: "gymId required" }, { status: 400 })
   }
 
-  if (!await gymBelongsToOwner(gymId, session.user.id)) {
-    logger.warn("gymBelongsToOwner failed", { gymId, userId: session.user.id })
+  if (!await gymBelongsToUser(gymId, session.user.id)) {
+    logger.warn("gymBelongsToUser failed", { gymId, userId: session.user.id })
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

@@ -30,6 +30,18 @@ export default auth((req) => {
     if (role !== "TRAINER" && isTrainerRoute) {
       return NextResponse.redirect(new URL("/dashboard", req.url))
     }
+
+    // El recepcionista no tiene selector de gimnasios: /reception lo manda al suyo.
+    const isReceptionRoute = req.nextUrl.pathname.startsWith("/reception")
+    const isGymPicker = req.nextUrl.pathname === "/" || req.nextUrl.pathname === "/dashboard"
+
+    if (role === "RECEPTIONIST" && isGymPicker) {
+      return NextResponse.redirect(new URL("/reception", req.url))
+    }
+
+    if (role !== "RECEPTIONIST" && isReceptionRoute) {
+      return NextResponse.redirect(new URL("/dashboard", req.url))
+    }
   }
 })
 

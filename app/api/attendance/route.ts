@@ -13,7 +13,7 @@ import { generateAttendanceSchema } from "@/modules/attendance/attendance.schema
 import { getTrainerByUserId } from "@/modules/trainers/trainers.service"
 import { logger } from "@/lib/logger"
 
-export const GET = withAuth([UserRole.TRAINER, UserRole.OWNER], async (req, session) => {
+export const GET = withAuth([UserRole.TRAINER, UserRole.OWNER, UserRole.RECEPTIONIST], async (req, session) => {
   const gymId = req.nextUrl.searchParams.get("gymId")
   const date = req.nextUrl.searchParams.get("date")
   const dateTo = req.nextUrl.searchParams.get("dateTo")
@@ -45,7 +45,7 @@ export const GET = withAuth([UserRole.TRAINER, UserRole.OWNER], async (req, sess
   return NextResponse.json(await getAttendanceByGymDate(gymId, date))
 })
 
-export const POST = withAuth([UserRole.TRAINER, UserRole.OWNER], async (req, session) => {
+export const POST = withAuth([UserRole.TRAINER, UserRole.OWNER, UserRole.RECEPTIONIST], async (req, session) => {
   const body = await req.json()
   const parsed = generateAttendanceSchema.safeParse(body)
   if (!parsed.success) {
