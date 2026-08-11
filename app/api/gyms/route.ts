@@ -4,11 +4,22 @@ import { withAuth } from "@/lib/with-auth"
 import { createGymSchema } from "@/modules/gyms/gyms.schema"
 import { getGymsByOwner, getGymById, createGym } from "@/modules/gyms/gyms.service"
 import { getTrainerByUserId } from "@/modules/trainers/trainers.service"
+import { getReceptionistByUserId } from "@/modules/receptionists/receptionists.service"
 import { logger } from "@/lib/logger"
 
-export const GET = withAuth([UserRole.OWNER, UserRole.TRAINER], async (_req, session) => {
+export const GET = withAuth([UserRole.OWNER, UserRole.TRAINER, UserRole.RECEPTIONIST], async (_req, session) => {
   if (session.user.role === UserRole.OWNER) {
     return NextResponse.json(await getGymsByOwner(session.user.id))
+  }
+
+  if (session.user.role === UserRole.RECEPTIONIST) {
+    const receptionist = await getReceptionistByUserId(session.user.id)
+    if (!receptionist) {
+      logger.warn("Receptionist not found", { id: session.user.id })
+      return NextResponse.json({ error: "Receptionist not found" }, { status: 404 })
+    }
+    const gym = await getGymById(receptionist.gymId)
+    return NextResponse.json(gym ? [gym] : [])
   }
 
   const trainer = await getTrainerByUserId(session.user.id)

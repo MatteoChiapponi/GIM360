@@ -1,22 +1,22 @@
 import { NextRequest, NextResponse } from "next/server"
 import { UserRole } from "@/app/generated/prisma/client"
 import { withAuthParams } from "@/lib/with-auth"
-import { gymBelongsToOwner, studentBelongsToGym } from "@/modules/belongs/belongs.service"
+import { gymBelongsToUser, studentBelongsToGym } from "@/modules/belongs/belongs.service"
 import { getStudentById, updateStudent, deactivateStudent } from "@/modules/students/students.service"
 import { updateStudentSchema } from "@/modules/students/students.schema"
 import { logger } from "@/lib/logger"
 
 type Params = { id: string }
 
-export const GET = withAuthParams<Params>([UserRole.OWNER], async (req, session, { id }) => {
+export const GET = withAuthParams<Params>([UserRole.OWNER, UserRole.RECEPTIONIST], async (req, session, { id }) => {
   const gymId = req.nextUrl.searchParams.get("gymId")
   if (!gymId) {
     logger.warn("Missing required param: gymId")
     return NextResponse.json({ error: "gymId required" }, { status: 400 })
   }
 
-  if (!await gymBelongsToOwner(gymId, session.user.id)) {
-    logger.warn("gymBelongsToOwner failed", { gymId, userId: session.user.id })
+  if (!await gymBelongsToUser(gymId, session.user.id)) {
+    logger.warn("gymBelongsToUser failed", { gymId, userId: session.user.id })
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
@@ -33,15 +33,15 @@ export const GET = withAuthParams<Params>([UserRole.OWNER], async (req, session,
   return NextResponse.json(student)
 })
 
-export const PATCH = withAuthParams<Params>([UserRole.OWNER], async (req, session, { id }) => {
+export const PATCH = withAuthParams<Params>([UserRole.OWNER, UserRole.RECEPTIONIST], async (req, session, { id }) => {
   const gymId = req.nextUrl.searchParams.get("gymId")
   if (!gymId) {
     logger.warn("Missing required param: gymId")
     return NextResponse.json({ error: "gymId required" }, { status: 400 })
   }
 
-  if (!await gymBelongsToOwner(gymId, session.user.id)) {
-    logger.warn("gymBelongsToOwner failed", { gymId, userId: session.user.id })
+  if (!await gymBelongsToUser(gymId, session.user.id)) {
+    logger.warn("gymBelongsToUser failed", { gymId, userId: session.user.id })
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
@@ -62,15 +62,15 @@ export const PATCH = withAuthParams<Params>([UserRole.OWNER], async (req, sessio
   return NextResponse.json(result)
 })
 
-export const DELETE = withAuthParams<Params>([UserRole.OWNER], async (req, session, { id }) => {
+export const DELETE = withAuthParams<Params>([UserRole.OWNER, UserRole.RECEPTIONIST], async (req, session, { id }) => {
   const gymId = req.nextUrl.searchParams.get("gymId")
   if (!gymId) {
     logger.warn("Missing required param: gymId")
     return NextResponse.json({ error: "gymId required" }, { status: 400 })
   }
 
-  if (!await gymBelongsToOwner(gymId, session.user.id)) {
-    logger.warn("gymBelongsToOwner failed", { gymId, userId: session.user.id })
+  if (!await gymBelongsToUser(gymId, session.user.id)) {
+    logger.warn("gymBelongsToUser failed", { gymId, userId: session.user.id })
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

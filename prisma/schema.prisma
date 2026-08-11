@@ -65,8 +65,9 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  owner   Owner?
-  trainer Trainer?
+  owner        Owner?
+  trainer      Trainer?
+  receptionist Receptionist?
 }
 
 model Owner {
@@ -90,6 +91,7 @@ model Gym {
   createdAt DateTime  @default(now())
 
   trainers      Trainer[]
+  receptionists Receptionist[]
   students      Student[]
   groups        Group[]
   fixedExpenses FixedExpense[]
@@ -124,6 +126,19 @@ model Trainer {
   createdAt    DateTime     @default(now())
 
   groups TrainerGroup[]
+
+  @@index([gymId])
+}
+
+model Receptionist {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gymId     String
+  gym       Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
 
   @@index([gymId])
 }

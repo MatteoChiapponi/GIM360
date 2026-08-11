@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { UserRole } from "@/app/generated/prisma/client"
 import { withAuthParams } from "@/lib/with-auth"
-import { gymBelongsToOwner, groupBelongsToGym, studentBelongsToGym } from "@/modules/belongs/belongs.service"
+import { gymBelongsToUser, groupBelongsToGym, studentBelongsToGym } from "@/modules/belongs/belongs.service"
 import { enrollStudent } from "@/modules/groups/groups.service"
 import { logger } from "@/lib/logger"
 
@@ -10,15 +10,15 @@ type Params = { id: string }
 
 const enrollSchema = z.object({ studentId: z.string().min(1) })
 
-export const POST = withAuthParams<Params>([UserRole.OWNER], async (req, session, { id: groupId }) => {
+export const POST = withAuthParams<Params>([UserRole.OWNER, UserRole.RECEPTIONIST], async (req, session, { id: groupId }) => {
   const gymId = req.nextUrl.searchParams.get("gymId")
   if (!gymId) {
     logger.warn("Missing required param: gymId")
     return NextResponse.json({ error: "gymId required" }, { status: 400 })
   }
 
-  if (!await gymBelongsToOwner(gymId, session.user.id)) {
-    logger.warn("gymBelongsToOwner failed", { gymId, userId: session.user.id })
+  if (!await gymBelongsToUser(gymId, session.user.id)) {
+    logger.warn("gymBelongsToUser failed", { gymId, userId: session.user.id })
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

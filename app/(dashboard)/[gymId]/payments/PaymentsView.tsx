@@ -98,7 +98,7 @@ function buildWhatsAppMessage(p: Payment, period: string, gymName: string): stri
   return `🏋️ *${gymName}* — Aviso automático\n\n¡Hola ${name}! 👋\n\nTe recordamos que tu cuota de *${mes}* por *${monto}* vence el *${fechaVenc}* (${diasTexto}) ⏰\n\nSi ya realizaste el pago podés ignorar este mensaje 😊\n\nAnte cualquier duda estamos a disposición. ¡Gracias! 💪`
 }
 
-export default function PaymentsView({ gymId }: { gymId: string }) {
+export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: string; canCloseCash?: boolean }) {
   const now = new Date()
   const maxPeriod = toYearMonth(now)
   const [period, setPeriod] = useState(maxPeriod)
@@ -166,7 +166,7 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
     } catch { /* silencioso */ }
   }, [gymId])
 
-  useEffect(() => { fetchHasClosings() }, [fetchHasClosings])
+  useEffect(() => { if (canCloseCash) fetchHasClosings() }, [canCloseCash, fetchHasClosings])
 
   useEffect(() => {
     if (showClosingConfirm) {
@@ -483,6 +483,7 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
         subtitle="Control de cuotas mensuales"
         action={
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            {canCloseCash && (
             <div className="relative group">
               <button
                 onClick={() => setShowClosingConfirm(true)}
@@ -501,6 +502,8 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
                 </div>
               )}
             </div>
+            )}
+            {canCloseCash && (
             <div className="relative group">
               <button
                 onClick={() => setShowUndoConfirm(true)}
@@ -519,6 +522,7 @@ export default function PaymentsView({ gymId }: { gymId: string }) {
                 </div>
               )}
             </div>
+            )}
             <Input
               type="month"
               value={period}

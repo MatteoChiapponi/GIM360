@@ -73,8 +73,23 @@ async function main() {
   await db.trainer.deleteMany({ where: { gymId: gym.id } })
   await db.group.deleteMany({ where: { gymId: gym.id } })
   await db.fixedExpense.deleteMany({ where: { gymId: gym.id } })
+  // Borrar el User arrastra al Receptionist por cascade
+  await db.user.deleteMany({ where: { receptionist: { gymId: gym.id } } })
 
   console.log("Cleaned up existing gym data")
+
+  // ── Receptionist ───────────────────────────────────────────────────────────
+
+  const receptionistUser = await db.user.create({
+    data: {
+      email: "recepcion@gym360.com",
+      hashedPassword: await bcrypt.hash("recepcion1234", 12),
+      role: "RECEPTIONIST",
+      receptionist: { create: { gymId: gym.id, name: "Sofia Recepcion" } },
+    },
+  })
+
+  console.log(`Receptionist: ${receptionistUser.email}`)
 
   // ── Fixed Expenses ─────────────────────────────────────────────────────────
 
@@ -685,7 +700,8 @@ Resumen GYM360 Palermo (${gym2.id}):
   Formativo:  10 alumnos x $32k, prof $3k/h
   Elite:       7 alumnos x $45k, prof $3.5k/h
 
-Login: admin@gym360.com / admin1234
+Login owner:      admin@gym360.com / admin1234
+Login recepcion:  recepcion@gym360.com / recepcion1234  (GYM360 Central)
   `)
 }
 

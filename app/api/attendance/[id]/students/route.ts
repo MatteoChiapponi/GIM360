@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { UserRole } from "@/app/generated/prisma/client"
 import { withAuthParams } from "@/lib/with-auth"
-import { gymBelongsToOwner, trainerCanAccessAttendance } from "@/modules/belongs/belongs.service"
+import { gymBelongsToUser, trainerCanAccessAttendance } from "@/modules/belongs/belongs.service"
 import { getAttendanceById, getGroupStudentsForAttendance } from "@/modules/attendance/attendance.service"
 import { getTrainerByUserId } from "@/modules/trainers/trainers.service"
 import { logger } from "@/lib/logger"
@@ -29,8 +29,8 @@ export const GET = withAuthParams<Params>(
       }
     } else {
       // OWNER / RECEPTIONIST
-      if (!(await gymBelongsToOwner(attendance.gymId, session.user.id))) {
-        logger.warn("gymBelongsToOwner failed", { gymId: attendance.gymId, userId: session.user.id })
+      if (!(await gymBelongsToUser(attendance.gymId, session.user.id))) {
+        logger.warn("gymBelongsToUser failed", { gymId: attendance.gymId, userId: session.user.id })
         return NextResponse.json({ error: "Forbidden" }, { status: 403 })
       }
     }

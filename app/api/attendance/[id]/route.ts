@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server"
 import { UserRole } from "@/app/generated/prisma/client"
 import { withAuthParams } from "@/lib/with-auth"
-import { gymBelongsToOwner, trainerCanAccessAttendance } from "@/modules/belongs/belongs.service"
+import { gymBelongsToUser, trainerCanAccessAttendance } from "@/modules/belongs/belongs.service"
 import { submitAttendance, getAttendanceById } from "@/modules/attendance/attendance.service"
 import { submitAttendanceSchema } from "@/modules/attendance/attendance.schema"
 import { getTrainerByUserId } from "@/modules/trainers/trainers.service"
 import { getOwnerByUserId } from "@/modules/gyms/gyms.service"
+import { getReceptionistByUserId } from "@/modules/receptionists/receptionists.service"
 import { logger } from "@/lib/logger"
 
 type Params = { id: string }
@@ -33,12 +34,17 @@ export const PATCH = withAuthParams<Params>(
         logger.warn("Attendance not found", { id })
         return NextResponse.json({ error: "Not found" }, { status: 404 })
       }
-      if (!(await gymBelongsToOwner(attendance.gymId, session.user.id))) {
-        logger.warn("gymBelongsToOwner failed", { gymId: attendance.gymId, userId: session.user.id })
+      if (!(await gymBelongsToUser(attendance.gymId, session.user.id))) {
+        logger.warn("gymBelongsToUser failed", { gymId: attendance.gymId, userId: session.user.id })
         return NextResponse.json({ error: "Forbidden" }, { status: 403 })
       }
-      const owner = await getOwnerByUserId(session.user.id)
-      submitterName = owner?.name ?? session.user.id
+      if (session.user.role === "RECEPTIONIST") {
+        const receptionist = await getReceptionistByUserId(session.user.id)
+        submitterName = receptionist?.name ?? session.user.id
+      } else {
+        const owner = await getOwnerByUserId(session.user.id)
+        submitterName = owner?.name ?? session.user.id
+      }
     }
 
     const body = await req.json()

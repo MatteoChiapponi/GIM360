@@ -11,6 +11,7 @@
 - [Students](#students)
 - [Student Files](#student-files)
 - [Trainers](#trainers)
+- [Receptionists](#receptionists)
 - [Groups](#groups)
 - [Group Students (inscripciones)](#group-students-inscripciones)
 - [Group Trainers (asignaciones)](#group-trainers-asignaciones)
@@ -28,7 +29,7 @@
 
 **Para que sirve:** Listar los gimnasios del usuario autenticado.
 
-**Roles:** `OWNER`, `TRAINER`
+**Roles:** `OWNER`, `TRAINER`, `RECEPTIONIST`
 
 **Recibe:** Nada (identifica al usuario por sesion).
 - Si es OWNER: retorna todos sus gimnasios.
@@ -63,7 +64,7 @@
 
 **Para que sirve:** Obtener un gimnasio por ID.
 
-**Roles:** `OWNER`
+**Roles:** `OWNER`, `RECEPTIONIST`
 
 **Recibe:** `id` en la URL.
 
@@ -112,7 +113,7 @@
 
 **Para que sirve:** Listar todos los alumnos de un gimnasio.
 
-**Roles:** `OWNER`
+**Roles:** `OWNER`, `RECEPTIONIST`
 
 **Recibe (query params):**
 | Param  | Tipo   | Requerido |
@@ -129,7 +130,7 @@
 
 **Para que sirve:** Crear un nuevo alumno.
 
-**Roles:** `OWNER`
+**Roles:** `OWNER`, `RECEPTIONIST`
 
 **Recibe (body JSON):**
 | Campo             | Tipo     | Requerido |
@@ -157,7 +158,7 @@
 
 **Para que sirve:** Obtener un alumno por ID.
 
-**Roles:** `OWNER`
+**Roles:** `OWNER`, `RECEPTIONIST`
 
 **Recibe:** `id` en URL + `gymId` en query param.
 
@@ -171,7 +172,7 @@
 
 **Para que sirve:** Actualizar datos de un alumno.
 
-**Roles:** `OWNER`
+**Roles:** `OWNER`, `RECEPTIONIST`
 
 **Recibe (body JSON):** Campos parciales (mismos que POST, excepto `gymId`).
 
@@ -185,7 +186,7 @@
 
 **Para que sirve:** Desactivar un alumno (soft delete — setea `leftAt`).
 
-**Roles:** `OWNER`
+**Roles:** `OWNER`, `RECEPTIONIST`
 
 **Recibe:** `id` en URL + `gymId` en query param.
 
@@ -201,7 +202,7 @@
 
 **Para que sirve:** Listar archivos de un alumno (fichas, aptos medicos) con URLs firmadas para descarga.
 
-**Roles:** `OWNER`
+**Roles:** `OWNER`, `RECEPTIONIST`
 
 **Recibe:** `id` del estudiante en URL + `gymId` en query param.
 
@@ -215,7 +216,7 @@
 
 **Para que sirve:** Subir un archivo para un alumno a Supabase Storage.
 
-**Roles:** `OWNER`
+**Roles:** `OWNER`, `RECEPTIONIST`
 
 **Recibe (FormData):**
 | Campo      | Tipo   | Requerido |
@@ -234,7 +235,7 @@
 
 **Para que sirve:** Descargar un archivo — genera una URL firmada (5 min) y redirige.
 
-**Roles:** `OWNER`
+**Roles:** `OWNER`, `RECEPTIONIST`
 
 **Recibe:** `id` del estudiante, `fileId` en URL + `gymId` en query param.
 
@@ -248,7 +249,7 @@
 
 **Para que sirve:** Eliminar un archivo del alumno (borra de Supabase Storage + registro DB).
 
-**Roles:** `OWNER`
+**Roles:** `OWNER`, `RECEPTIONIST`
 
 **Recibe:** `id` del estudiante, `fileId` en URL + `gymId` en query param.
 
@@ -328,13 +329,107 @@
 
 ---
 
+## Receptionists
+
+> El recepcionista pertenece a un solo gimnasio (`Receptionist.gymId`) y siempre tiene un `User`
+> asociado — el registro existe unicamente para darle acceso. `active: false` corta el acceso sin
+> borrar el registro.
+
+### `GET /api/receptionists?gymId=xxx`
+
+**Para que sirve:** Listar los recepcionistas de un gimnasio.
+
+**Roles:** `OWNER`
+
+**Recibe (query):** `gymId` (requerido).
+
+**Retorna:** `Receptionist[]` con `user.email`.
+
+**Donde se usa:** `ReceptionistsView.tsx` — tabla de accesos de recepcion.
+
+---
+
+### `POST /api/receptionists`
+
+**Para que sirve:** Crear un recepcionista junto con su usuario de login (transaccional).
+
+**Roles:** `OWNER`
+
+**Recibe (body JSON):**
+| Campo      | Tipo   | Requerido |
+|------------|--------|-----------|
+| `gymId`    | string | Si        |
+| `name`     | string | Si        |
+| `email`    | string | Si        |
+| `password` | string | Si (min 8)|
+
+**Retorna:** `Receptionist` (201 Created). `409` si el email ya esta registrado en GYM360.
+
+**Donde se usa:** `ReceptionistsView.tsx` — modal "Nuevo recepcionista".
+
+---
+
+### `PATCH /api/receptionists/:id?gymId=xxx`
+
+**Para que sirve:** Renombrar o activar/desactivar el acceso.
+
+**Roles:** `OWNER`
+
+**Recibe (body JSON):** `name` (opcional), `active` (opcional).
+
+**Retorna:** `Receptionist`.
+
+**Donde se usa:** `ReceptionistsView.tsx` — boton Activar/Desactivar.
+
+---
+
+### `POST /api/receptionists/:id/password?gymId=xxx`
+
+**Para que sirve:** Resetear la contraseña del recepcionista.
+
+**Roles:** `OWNER`
+
+**Recibe (body JSON):** `password` (requerido, min 8).
+
+**Retorna:** 204 No Content.
+
+**Donde se usa:** `ReceptionistsView.tsx` — modal "Nueva contraseña".
+
+---
+
+### `DELETE /api/receptionists/:id?gymId=xxx`
+
+**Para que sirve:** Eliminar el acceso. Borra el `User`, que arrastra al `Receptionist` por cascade.
+
+**Roles:** `OWNER`
+
+**Retorna:** 204 No Content.
+
+**Donde se usa:** `ReceptionistsView.tsx` — boton Eliminar.
+
+---
+
+### `GET /api/receptionists/me`
+
+**Para que sirve:** Perfil del recepcionista autenticado, con su gimnasio.
+
+**Roles:** `RECEPTIONIST`
+
+**Recibe:** Nada (identifica al usuario por sesion).
+
+**Retorna:** `Receptionist` con `gym: { id, name, status }`.
+
+**Donde se usa:** Resolucion del gimnasio propio (`/reception`).
+
+---
+
 ## Groups
 
 ### `GET /api/groups?gymId=xxx`
 
 **Para que sirve:** Listar todos los grupos de un gimnasio.
 
-**Roles:** `OWNER`
+**Roles:** `OWNER`, `RECEPTIONIST`
 
 **Recibe (query params):**
 | Param  | Tipo   | Requerido |
@@ -420,7 +515,7 @@
 
 **Para que sirve:** Inscribir un alumno en un grupo (crear registro `StudentGroup`).
 
-**Roles:** `OWNER`
+**Roles:** `OWNER`, `RECEPTIONIST`
 
 **Recibe (body JSON):**
 | Campo       | Tipo   | Requerido |
