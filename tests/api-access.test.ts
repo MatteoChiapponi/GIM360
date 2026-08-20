@@ -239,6 +239,11 @@ const RECEPTIONIST_ALLOWED: Endpoint[] = [
     call: async (gymId) =>
       (await import("@/app/api/gyms/[id]/route")).GET(makeRequest(`/api/gyms/${gymId}`), withParams({ id: gymId })),
   },
+  {
+    name: "GET /api/payment-methods",
+    call: async (gymId) =>
+      (await import("@/app/api/payment-methods/route")).GET(makeRequest(`/api/payment-methods?gymId=${gymId}`)),
+  },
 ]
 
 const RECEPTIONIST_DENIED: Endpoint[] = [
@@ -338,6 +343,19 @@ const RECEPTIONIST_DENIED: Endpoint[] = [
     name: "GET /api/admin/owners",
     ownerAllowed: false,
     call: async () => (await import("@/app/api/admin/owners/route")).GET(makeRequest("/api/admin/owners")),
+  },
+  {
+    name: "PATCH /api/payment-methods (configurar medios de pago)",
+    call: async (gymId) =>
+      (await import("@/app/api/payment-methods/route")).PATCH(
+        makeRequest("/api/payment-methods", {
+          method: "PATCH",
+          body: {
+            gymId,
+            configs: [{ method: "CARD", enabled: true, adjustmentType: "SURCHARGE", adjustmentPercent: 10 }],
+          },
+        }),
+      ),
   },
   {
     name: "POST /api/schedules",

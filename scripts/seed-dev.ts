@@ -73,6 +73,7 @@ async function main() {
   await db.trainer.deleteMany({ where: { gymId: gym.id } })
   await db.group.deleteMany({ where: { gymId: gym.id } })
   await db.fixedExpense.deleteMany({ where: { gymId: gym.id } })
+  await db.paymentMethodConfig.deleteMany({ where: { gymId: gym.id } })
   // Borrar el User arrastra al Receptionist por cascade
   await db.user.deleteMany({ where: { receptionist: { gymId: gym.id } } })
 
@@ -104,6 +105,18 @@ async function main() {
   })
 
   console.log("Fixed expenses: $180.000/mes")
+
+  // ── Payment methods ────────────────────────────────────────────────────────
+
+  await db.paymentMethodConfig.createMany({
+    data: [
+      { gymId: gym.id, method: "CASH", enabled: true, adjustmentType: "DISCOUNT", adjustmentPercent: 5 },
+      { gymId: gym.id, method: "TRANSFER", enabled: true },
+      { gymId: gym.id, method: "CARD", enabled: true, adjustmentType: "SURCHARGE", adjustmentPercent: 10 },
+    ],
+  })
+
+  console.log("Payment methods: efectivo -5%, transferencia sin ajuste, tarjeta +10%")
 
   // ── Groups ─────────────────────────────────────────────────────────────────
 

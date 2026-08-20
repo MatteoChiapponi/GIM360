@@ -70,6 +70,7 @@ export const db = {
   studentGroup: table(),
   schedule: table(),
   payment: table(),
+  paymentMethodConfig: table(),
   fixedExpense: table(),
   cashClosing: table(),
   attendance: table(),

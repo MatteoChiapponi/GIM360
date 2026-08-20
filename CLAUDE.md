@@ -103,6 +103,7 @@ User (auth)
  │         │    ├── Schedule[]      (weekDays: DayOfWeek[], startTime/endTime: "HH:MM")
  │         │    └── Attendance[]
  │         ├── Payment[]  ── CashClosing[]
+ │         ├── PaymentMethodConfig[]  (uno por PaymentMethod; sin fila = habilitado y sin ajuste)
  │         ├── StudentFile[]
  │         └── FixedExpense[]
  ├── Trainer 1:1  (optional)
@@ -121,7 +122,7 @@ User (auth)
 `/[gymId]`, con la nav recortada a Alumnos / Asistencias / Cuotas (`RECEPTIONIST_SECTIONS` en
 `components/layout/NavLinks.tsx`). Puede hacer CRUD de alumnos (incluidas fichas y apto médico),
 inscribirlos en grupos, generar las cuotas del mes y registrar pagos, y cargar asistencias.
-Quedan fuera: cierres de caja, gastos, métricas, grupos y entrenadores. `active: false` corta el
+Quedan fuera: cierres de caja, gastos, métricas, grupos, entrenadores y la configuración del gimnasio. `active: false` corta el
 acceso sin borrar el registro; `DELETE` borra el `User` y arrastra al `Receptionist` por cascade.
 
 ### Enums (in schema.prisma)
@@ -130,8 +131,25 @@ acceso sin borrar el registro; `DELETE` borra el `User` y arrastra al `Reception
 - `StudentStatus`: `ACTIVE | INACTIVE | TRIAL`
 - `PaymentStatus`: `PENDING | PAID | EXPIRED`
 - `PaymentMethod`: `CASH | TRANSFER | CARD`
+- `PaymentAdjustmentType`: `NONE | SURCHARGE | DISCOUNT` — ajuste que cada gimnasio le configura a un medio de pago
 - `StudentFileType`: `FICHA | APTO_MEDICO`
 - `DayOfWeek`: `MONDAY | TUESDAY | WEDNESDAY | THURSDAY | FRIDAY | SATURDAY | SUNDAY`
+
+### Medios de pago
+
+Los tres valores de `PaymentMethod` son fijos, pero cada gimnasio configura cómo los usa en
+`PaymentMethodConfig` (`modules/payment-methods/`): si están habilitados y qué recargo o descuento
+en % se aplica al cobrar con ellos. La ausencia de fila equivale al default — habilitado y sin
+ajuste — así que un gimnasio nuevo funciona sin inicializar nada.
+
+- **Configuración**: `/[gymId]/settings`, solo owner. `GET /api/payment-methods` lo leen owner y
+  recepcionista (el recepcionista necesita saber con qué medios puede cobrar); `PATCH` es del owner.
+  Siempre tiene que quedar al menos un medio habilitado — se valida sobre el resultado del merge,
+  no sobre lo que manda el body.
+- **Cobro**: el ajuste lo calcula el backend en `PATCH /api/payments/:id`, nunca el cliente. Guarda
+  `baseAmount` (la cuota), `methodAdjustment` (firmado) y deja en `amount` el monto realmente
+  cobrado, que es el que suman cierres de caja y métricas. Cobrar con un medio deshabilitado da 400.
+  Al despagar, `amount` vuelve a `baseAmount` y el ajuste se limpia.
 
 ### Route groups
 - `app/(auth)/` — public routes (`/login`)
@@ -153,6 +171,7 @@ Lo que sí se mockea: `@/lib/auth` (la sesión), `@/lib/logger` y los servicios 
 | `tests/role-routing.test.ts` | Ruteo por rol del proxy + invariante de que ningún redirect encadena otro |
 | `tests/guards.test.ts` | `requireGymRole` y su fallback por rol |
 | `tests/receptionists.service.test.ts` | Alta transaccional, email duplicado, hash de contraseña, borrado por cascade |
+| `tests/payment-methods.test.ts` | Cálculo del recargo/descuento, cobro con la config del gimnasio, medio deshabilitado, invariante de "al menos uno habilitado" |
 
 Al agregar un endpoint que acepte más de un rol, sumalo al catálogo de `api-access.test.ts`: las
 listas `RECEPTIONIST_ALLOWED` / `RECEPTIONIST_DENIED` son la definición ejecutable de los permisos.
@@ -201,6 +220,7 @@ modules/                    ← Business logic, one folder per domain
   receptionists/
   groups/
   schedules/
+  payment-methods/          ← Config por gimnasio de cada medio de pago
 
 app/api/                    ← HTTP layer only (thin controllers)
   auth/[...nextauth]/       ← NextAuth internals, do not touch

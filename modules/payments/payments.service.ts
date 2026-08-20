@@ -2,7 +2,13 @@ import { db } from "@/lib/db"
 import type { PaymentMethod } from "@/app/generated/prisma/client"
 import type { UpdatePaymentInput } from "./payments.schema"
 
-type UpdatePaymentData = Omit<UpdatePaymentInput, "paymentMethod"> & { paymentMethod?: PaymentMethod | null }
+type UpdatePaymentData = Omit<UpdatePaymentInput, "paymentMethod"> & {
+  paymentMethod?: PaymentMethod | null
+  /** Monto de la cuota antes del ajuste del medio de pago */
+  baseAmount?: number | null
+  /** Ajuste aplicado, firmado (+ recargo / − descuento) */
+  methodAdjustment?: number | null
+}
 
 /** Parses "YYYY-MM" into the first-day-of-month Date (UTC) */
 function parsePeriod(period: string): Date {
@@ -150,7 +156,7 @@ export async function getPaymentsByStudent(studentId: string) {
   })
 }
 
-/** Updates a payment (status, paidAt, notes, amount, paymentMethod) */
+/** Updates a payment (status, paidAt, notes, amount, paymentMethod y el ajuste del medio de pago) */
 export async function updatePayment(id: string, data: UpdatePaymentData) {
   return db.payment.update({
     where: { id },
