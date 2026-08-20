@@ -80,6 +80,9 @@ if (session.user.role === "TRAINER") {
 | `lib/auth.ts` | NextAuth config — authorize logic with bcrypt, JWT/session callbacks propagate `id` and `role` |
 | `lib/db.ts` | Prisma singleton — uses `PrismaPg` adapter; `DATABASE_URL` must be set |
 | `lib/utils.ts` | `cn()` helper (clsx + tailwind-merge) |
+| `lib/money.ts` | `round2()` y `formatMoney()` — el redondeo de todo monto que se guarda, compartido por servicios y vistas |
+| `lib/payment-methods.ts` | Parte client-safe de los medios de pago: valores, etiquetas y la fórmula del ajuste |
+| `lib/late-fee.ts` | Parte client-safe de la mora: vencimiento, días de atraso y la fórmula del recargo |
 | `proxy.ts` | Route guard — sin sesión → `/login`; con sesión, manda cada rol a su área |
 | `lib/guards.ts` | `requireGymRole(gymId, roles)` — guard de rol para páginas de `/[gymId]` |
 | `lib/with-auth.ts` | `withAuth(roles, handler)` / `withAuthParams` — auth + rol + logging del request |
@@ -212,7 +215,9 @@ aplicaciones es por bloque empezado — con `repeatEveryDays: 7`, ocho días de 
   Al despagar, `amount` vuelve a `baseAmount` y se limpia todo lo demás.
 - **Dos formas de no cobrarlo**: `Student.lateFeeExempt` exime al alumno de forma permanente (beca,
   arreglo particular) y `Payment.lateFeeWaived` condona una cuota puntual desde el modal de cobro.
-  Ambas dejan `lateDays` cargado — lo que se perdona es el monto, no el registro del atraso.
+  Ambas dejan `lateDays` cargado — lo que se perdona es el monto, no el registro del atraso. La
+  condonación es de ese cobro: al despagar se limpia junto con el resto, así que la cuota vuelve a
+  deber la mora que corresponda.
 
 **Dónde impacta**:
 

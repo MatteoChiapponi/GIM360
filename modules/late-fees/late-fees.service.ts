@@ -20,7 +20,9 @@ type _SameFeeTypes = LateFeeTypeValue extends LateFeeType ? (LateFeeType extends
  */
 export async function getLateFeeConfig(gymId: string): Promise<LateFeeConfig> {
   const row = await db.lateFeeConfig.findFirst({ where: { gymId } })
-  if (!row) return DEFAULT_LATE_FEE_CONFIG
+  // Copia, no la constante: el default es compartido por todos los gimnasios y
+  // devolverlo por referencia deja que un caller lo mute para todos.
+  if (!row) return { ...DEFAULT_LATE_FEE_CONFIG }
 
   return {
     enabled: row.enabled,

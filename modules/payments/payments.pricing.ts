@@ -4,6 +4,7 @@ import {
   getPaymentMethodConfig,
 } from "@/modules/payment-methods/payment-methods.service"
 import { getLateFeeConfig, lateFeeFor } from "@/modules/late-fees/late-fees.service"
+import { round2 } from "@/lib/money"
 import type { UpdatePaymentInput } from "./payments.schema"
 
 /** Lo único que hace falta del pago guardado para poder recalcularlo. */
@@ -29,8 +30,6 @@ export type PaymentAmountFields = {
 export type PricingResult =
   | { ok: true; fields: PaymentAmountFields }
   | { ok: false; disabledMethod: PaymentMethod }
-
-const round2 = (n: number) => Math.round(n * 100) / 100
 
 /**
  * Decide qué montos hay que guardar al actualizar un pago.
@@ -64,6 +63,8 @@ export async function resolvePaymentAmounts(
         methodAdjustment: null,
         lateFee: null,
         lateDays: null,
+        // La condonación era para ese cobro: al despagar vuelve a estar en juego.
+        lateFeeWaived: false,
       },
     }
   }
@@ -80,7 +81,10 @@ export async function resolvePaymentAmounts(
 
   if (!method || !repricing) return { ok: true, fields: {} }
 
-  const config = await getPaymentMethodConfig(gymId, method)
+  const [config, lateConfig] = await Promise.all([
+    getPaymentMethodConfig(gymId, method),
+    getLateFeeConfig(gymId),
+  ])
   if (!config.enabled) return { ok: false, disabledMethod: method }
 
   // La cuota limpia: la que se manda, la que ya estaba guardada como base, o el
@@ -93,7 +97,6 @@ export async function resolvePaymentAmounts(
   const waived = input.lateFeeWaived ?? existing.lateFeeWaived
   const exempt = waived || existing.student.lateFeeExempt
 
-  const lateConfig = await getLateFeeConfig(gymId)
   const { fee, lateDays } = lateFeeFor(baseAmount, existing.period, existing.student.dueDay, lateConfig, chargedAt)
   const lateFee = exempt ? 0 : fee
 

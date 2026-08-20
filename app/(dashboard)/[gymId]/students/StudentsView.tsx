@@ -17,9 +17,9 @@ import { FormModal } from "@/components/ui/FormModal"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 import {
   PAYMENT_METHOD_LABEL,
-  formatMoney,
   type PaymentMethodValue as PaymentMethod,
 } from "@/lib/payment-methods"
+import { formatMoney } from "@/lib/money"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

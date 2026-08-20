@@ -10,6 +10,8 @@
  * servicio tiene un chequeo de tipos que deja de compilar si los dos se separan.
  */
 
+import { round2 } from "./money"
+
 export type LateFeeTypeValue = "FIXED" | "PERCENT"
 
 export type LateFeeConfig = {
@@ -41,8 +43,6 @@ export const DEFAULT_LATE_FEE_CONFIG: LateFeeConfig = {
   maxCharges: null,
   maxFeeAmount: null,
 }
-
-const round2 = (n: number) => Math.round(n * 100) / 100
 
 const MS_PER_DAY = 86_400_000
 

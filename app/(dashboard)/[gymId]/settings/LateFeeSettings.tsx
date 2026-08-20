@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button"
 import { NumberInput } from "@/components/ui/NumberInput"
 import { Select } from "@/components/ui/Select"
 import { Skeleton } from "@/components/ui/Skeleton"
-import { formatMoney } from "@/lib/payment-methods"
+import { formatMoney } from "@/lib/money"
 import {
   DEFAULT_LATE_FEE_CONFIG,
   computeLateFee,
@@ -69,6 +69,35 @@ const toConfig = (d: Draft): LateFeeConfig => {
   }
 }
 
+/** Decimales escritos en un campo, para adelantar el `multipleOf(0.01)` del schema. */
+const decimals = (raw: string) => raw.split(".")[1]?.length ?? 0
+
+const inRange = (n: number | null, min: number, max: number) => n !== null && n >= min && n <= max
+
+/**
+ * Mismo criterio que el schema del backend, para poder mostrar un error concreto
+ * en vez del objeto de Zod. Devuelve el primer problema, o null si está todo bien.
+ */
+function validationError(d: Draft, body: LateFeeConfig): string | null {
+  if (!body.enabled) return null
+
+  if (!(body.feeValue > 0)) return "El recargo tiene que ser mayor a 0."
+  if (decimals(d.feeValue) > 2) return "El recargo admite hasta dos decimales."
+  if (body.feeType === "PERCENT" && body.feeValue > 100) return "El porcentaje no puede superar el 100%."
+  if (!inRange(body.graceDays, 0, 365)) return "Los días de tolerancia tienen que estar entre 0 y 365."
+
+  if (d.repeats && !inRange(body.repeatEveryDays, 1, 365))
+    return "Repetir el recargo cada cuántos días tiene que ser un número entre 1 y 365."
+  if (d.repeats && d.cappedCharges && !inRange(body.maxCharges, 1, 365))
+    return "El máximo de veces tiene que estar entre 1 y 365, o destildá ese límite."
+
+  if (d.cappedAmount && !(body.maxFeeAmount !== null && body.maxFeeAmount > 0))
+    return "El tope en pesos tiene que ser mayor a 0, o destildá ese límite."
+  if (d.cappedAmount && decimals(d.maxFeeAmount) > 2) return "El tope en pesos admite hasta dos decimales."
+
+  return null
+}
+
 const sameConfig = (a: LateFeeConfig, b: LateFeeConfig) =>
   a.enabled === b.enabled &&
   a.graceDays === b.graceDays &&
@@ -122,28 +151,10 @@ export function LateFeeSettings({ gymId }: { gymId: string }) {
 
     const body = toConfig(draft)
 
-    // Mismo criterio que el schema del backend, para no mostrar un error genérico
-    if (body.enabled) {
-      if (!(body.feeValue > 0)) {
-        setSaveError("El recargo tiene que ser mayor a 0.")
-        return
-      }
-      if (body.feeType === "PERCENT" && body.feeValue > 100) {
-        setSaveError("El porcentaje no puede superar el 100%.")
-        return
-      }
-      if (draft.repeats && !(Number(draft.repeatEveryDays) >= 1)) {
-        setSaveError("Ingresá cada cuántos días se repite el recargo, o destildá la repetición.")
-        return
-      }
-      if (draft.repeats && draft.cappedCharges && !(Number(draft.maxCharges) >= 1)) {
-        setSaveError("El máximo de veces tiene que ser 1 o más, o destildá ese límite.")
-        return
-      }
-      if (draft.cappedAmount && !(Number(draft.maxFeeAmount) > 0)) {
-        setSaveError("El tope en pesos tiene que ser mayor a 0, o destildá ese límite.")
-        return
-      }
+    const invalid = validationError(draft, body)
+    if (invalid) {
+      setSaveError(invalid)
+      return
     }
 
     setSaving(true)

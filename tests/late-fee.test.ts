@@ -144,6 +144,18 @@ describe("computeLateFee", () => {
     expect(computeLateFee(10000, 90, rule)).toBe(100)
   })
 
+  it("una regla habilitada con monto 0 no cobra nada", () => {
+    expect(computeLateFee(10000, 30, config({ feeValue: 0 }))).toBe(0)
+  })
+
+  it("el borde de la tolerancia: el último día perdonado y el primero que cobra", () => {
+    const rule = config({ feeType: "FIXED", feeValue: 100, graceDays: 5, repeatEveryDays: 1 })
+    expect(lateFeeCharges(5, rule)).toBe(0)
+    expect(lateFeeCharges(6, rule)).toBe(1)
+    expect(computeLateFee(10000, 5, rule)).toBe(0)
+    expect(computeLateFee(10000, 6, rule)).toBe(100)
+  })
+
   it("la tolerancia se descuenta antes de contar las repeticiones", () => {
     const rule = config({ feeType: "FIXED", feeValue: 100, repeatEveryDays: 1, graceDays: 5 })
     expect(computeLateFee(10000, 10, rule)).toBe(500)
@@ -183,6 +195,37 @@ describe("Al cobrar una cuota vencida se aplica la regla de mora", () => {
       IDS.payment1,
       expect.objectContaining({ amount: 12100, baseAmount: 10000, lateFee: 1000, methodAdjustment: 1100 }),
     )
+  })
+
+  it("los montos guardados cierran: amount = cuota + mora + ajuste del medio", async () => {
+    seedRule({ enabled: true, feeType: "PERCENT", feeValue: 10 })
+    seed("paymentMethodConfig", [
+      { id: "cfg1", gymId: IDS.gym1, method: "CASH", enabled: true, adjustmentType: "DISCOUNT", adjustmentPercent: 5 },
+    ])
+
+    await markPaid("CASH")
+
+    const [, fields] = mockUpdatePayment.mock.calls[0] as [string, Record<string, number>]
+    // 10000 de cuota + 1000 de mora = 11000, menos el 5% de efectivo = 10450
+    expect(fields).toMatchObject({ amount: 10450, baseAmount: 10000, lateFee: 1000, methodAdjustment: -550 })
+    expect(fields.amount).toBe(fields.baseAmount + fields.lateFee + fields.methodAdjustment)
+  })
+
+  it("condonar una cuota impaga se guarda sin tocar los montos", async () => {
+    seedRule({ enabled: true, feeType: "PERCENT", feeValue: 10 })
+
+    const { PATCH } = await import("@/app/api/payments/[id]/route")
+    const res = await PATCH(
+      makeRequest(`/api/payments/${IDS.payment1}?gymId=${IDS.gym1}`, {
+        method: "PATCH",
+        body: { lateFeeWaived: true },
+      }),
+      withParams({ id: IDS.payment1 }),
+    )
+
+    // Sin medio de pago no hay nada que recalcular: solo queda la decisión tomada
+    expect(res.status).toBe(200)
+    expect(mockUpdatePayment).toHaveBeenCalledWith(IDS.payment1, { lateFeeWaived: true })
   })
 
   it("pagar en fecha no genera recargo", async () => {
@@ -289,7 +332,33 @@ describe("Al cobrar una cuota vencida se aplica la regla de mora", () => {
     expect(res.status).toBe(200)
     expect(mockUpdatePayment).toHaveBeenCalledWith(
       IDS.payment1,
-      expect.objectContaining({ amount: 10000, baseAmount: null, lateFee: null, lateDays: null }),
+      expect.objectContaining({
+        amount: 10000,
+        baseAmount: null,
+        lateFee: null,
+        lateDays: null,
+        // La condonación era de ese cobro: vuelve a estar en juego
+        lateFeeWaived: false,
+      }),
+    )
+  })
+
+  it("una cuota que quedó condonada se vuelve a cobrar condonada", async () => {
+    seedRule({ enabled: true, feeType: "PERCENT", feeValue: 10 })
+    seed("payment", [paymentRow({ lateFeeWaived: true })])
+
+    const { PATCH } = await import("@/app/api/payments/[id]/route")
+    await PATCH(
+      makeRequest(`/api/payments/${IDS.payment1}?gymId=${IDS.gym1}`, {
+        method: "PATCH",
+        body: { status: "PAID", paidAt: PAID_AT.toISOString(), paymentMethod: "CASH" },
+      }),
+      withParams({ id: IDS.payment1 }),
+    )
+
+    expect(mockUpdatePayment).toHaveBeenCalledWith(
+      IDS.payment1,
+      expect.objectContaining({ amount: 10000, lateFee: 0, lateFeeWaived: true }),
     )
   })
 
@@ -321,6 +390,35 @@ describe("Configuración de la mora", () => {
     const res = await GET(makeRequest(`/api/late-fee?gymId=${IDS.gym1}`))
 
     expect(res.status).toBe(200)
+    expect(await res.json()).toEqual(DEFAULT_LATE_FEE_CONFIG)
+  })
+
+  it("devuelve la regla guardada del gimnasio", async () => {
+    seedRule({ enabled: true, graceDays: 3, feeType: "FIXED", feeValue: 750, repeatEveryDays: 14, maxCharges: 2 })
+
+    const { GET } = await import("@/app/api/late-fee/route")
+    const res = await GET(makeRequest(`/api/late-fee?gymId=${IDS.gym1}`))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      enabled: true,
+      graceDays: 3,
+      feeType: "FIXED",
+      feeValue: 750,
+      repeatEveryDays: 14,
+      maxCharges: 2,
+      maxFeeAmount: null,
+    })
+  })
+
+  it("la regla de otro gimnasio no se filtra", async () => {
+    seed("lateFeeConfig", [
+      { id: "lfc2", gymId: IDS.gym2, ...DEFAULT_LATE_FEE_CONFIG, enabled: true, feeValue: 99 },
+    ])
+
+    const { GET } = await import("@/app/api/late-fee/route")
+    const res = await GET(makeRequest(`/api/late-fee?gymId=${IDS.gym1}`))
+
     expect(await res.json()).toEqual(DEFAULT_LATE_FEE_CONFIG)
   })
 

@@ -11,6 +11,8 @@
  * chequeo de tipos que deja de compilar si alguno de los dos se mueve.
  */
 
+import { round2 } from "./money"
+
 export const PAYMENT_METHOD_VALUES = ["CASH", "TRANSFER", "CARD"] as const
 
 export type PaymentMethodValue = (typeof PAYMENT_METHOD_VALUES)[number]
@@ -28,8 +30,6 @@ export const PAYMENT_METHOD_LABEL: Record<PaymentMethodValue, string> = {
   TRANSFER: "Transferencia",
   CARD: "Tarjeta",
 }
-
-const round2 = (n: number) => Math.round(n * 100) / 100
 
 /** Ajuste firmado (+ recargo / − descuento) que el medio de pago aplica al monto. */
 export function methodAdjustment(
@@ -62,5 +62,3 @@ export function adjustmentLabel(
 export function defaultPaymentMethodConfig(method: PaymentMethodValue): PaymentMethodConfig {
   return { method, enabled: true, adjustmentType: "NONE", adjustmentPercent: 0 }
 }
-
-export const formatMoney = (n: number) => `$${n.toLocaleString("es-AR")}`

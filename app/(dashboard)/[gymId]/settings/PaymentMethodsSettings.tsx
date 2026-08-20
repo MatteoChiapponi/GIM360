@@ -11,12 +11,12 @@ import {
   PAYMENT_METHOD_LABEL,
   adjustedAmount,
   defaultPaymentMethodConfig,
-  formatMoney,
   methodAdjustment,
   type AdjustmentType,
   type PaymentMethodConfig,
   type PaymentMethodValue,
 } from "@/lib/payment-methods"
+import { formatMoney } from "@/lib/money"
 
 /** Cuota de referencia para mostrar cómo queda el monto con cada ajuste. */
 const SAMPLE_AMOUNT = 10000

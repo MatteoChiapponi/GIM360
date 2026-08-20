@@ -16,10 +16,10 @@ import {
   adjustedAmount,
   adjustmentLabel,
   defaultPaymentMethodConfig,
-  formatMoney,
   type PaymentMethodConfig,
   type PaymentMethodValue as PaymentMethod,
 } from "@/lib/payment-methods"
+import { formatMoney } from "@/lib/money"
 import {
   DEFAULT_LATE_FEE_CONFIG,
   computeLateFee,
@@ -167,10 +167,11 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
   // Condonar el recargo por mora de esta cuota puntual, al momento de cobrarla
   const [waiveLateFee, setWaiveLateFee] = useState(false)
 
-  /** Abre el modal de cobro, siempre con el recargo por mora activo. */
-  function openPayModal(id: string) {
-    setWaiveLateFee(false)
-    setPayMethodForId(id)
+  /** Abre el modal de cobro reflejando la condonación que ya tenga el pago, para
+   *  que la vista previa y lo que después cobra el backend coincidan. */
+  function openPayModal(p: Payment) {
+    setWaiveLateFee(p.lateFeeWaived)
+    setPayMethodForId(p.id)
   }
 
   // Config de medios de pago del gimnasio (habilitados + recargo/descuento)
@@ -201,18 +202,25 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
   }, [gymId])
 
   /**
-   * Recargo por mora de una cuota. En un pago cobrado es el que quedó guardado;
-   * en uno impago es una vista previa que crece con los días — el monto real lo
-   * vuelve a calcular el backend al registrar el pago.
+   * Recargo que le corresponde a la cuota por el atraso, sin mirar si está
+   * condonado. En un pago cobrado es el que quedó guardado; en uno impago es una
+   * vista previa que crece con los días — el monto real lo vuelve a calcular el
+   * backend al registrar el pago.
    */
-  function lateFeeOf(p: Payment): number {
+  function accruedLateFee(p: Payment): number {
     if (p.status === "PAID") return p.lateFee ? Number(p.lateFee) : 0
-    if (p.lateFeeWaived || p.student.lateFeeExempt) return 0
+    if (p.student.lateFeeExempt) return 0
     return computeLateFee(Number(p.amount), lateDaysAt(period, p.student.dueDay), lateFeeConfig)
   }
 
-  // Lo que se está por cobrar en el modal: la cuota más la mora, salvo que se condone.
-  const payMethodLateFee = payMethodPayment ? lateFeeOf(payMethodPayment) : 0
+  /** Lo que se cobraría hoy de recargo: 0 si la cuota está condonada. */
+  function chargedLateFee(p: Payment): number {
+    return p.lateFeeWaived ? 0 : accruedLateFee(p)
+  }
+
+  // En el modal se muestra el recargo aunque esté condonado, para que el tilde de
+  // "no cobrarlo" sea visible y se pueda volver atrás.
+  const payMethodLateFee = payMethodPayment ? accruedLateFee(payMethodPayment) : 0
   const payMethodChargeable =
     (payMethodPayment ? Number(payMethodPayment.amount) : 0) + (waiveLateFee ? 0 : payMethodLateFee)
 
@@ -423,11 +431,12 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
   const collected = payments.filter((p) => p.status === "PAID").reduce((sum, p) => sum + Number(p.amount), 0)
   const pendingAmount = payments.filter((p) => p.status === "PENDING").reduce((sum, p) => sum + Number(p.amount), 0)
   const expiredAmount = payments.filter((p) => p.status === "EXPIRED").reduce((sum, p) => sum + Number(p.amount), 0)
-  // Mora acumulada hoy en lo que sigue impago. No entra en los totales de cobranza:
-  // todavía no se cobró, y se congela recién al registrar cada pago.
-  const accruedLateFees = payments
+  // Mora que se cobraría hoy sobre lo que sigue impago (sin las cuotas condonadas).
+  // No entra en los totales de cobranza: todavía no se cobró, y se congela recién
+  // al registrar cada pago.
+  const pendingLateFees = payments
     .filter((p) => p.status !== "PAID")
-    .reduce((sum, p) => sum + lateFeeOf(p), 0)
+    .reduce((sum, p) => sum + chargedLateFee(p), 0)
   const uncollectedAmount = pendingAmount + expiredAmount
   const total = collected + uncollectedAmount
   const collectionPct = total > 0 ? Math.round((collected / total) * 100) : 0
@@ -676,8 +685,8 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
           value={expired}
           valueColor="text-red-700"
           subtitle={
-            accruedLateFees > 0
-              ? `$${expiredAmount.toLocaleString("es-AR")} + ${formatMoney(accruedLateFees)} de mora`
+            pendingLateFees > 0
+              ? `$${expiredAmount.toLocaleString("es-AR")} + ${formatMoney(pendingLateFees)} de mora`
               : `$${expiredAmount.toLocaleString("es-AR")}`
           }
         />
@@ -734,7 +743,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
             render: (p) => {
               // En una cuota impaga la mora todavía corre: se muestra aparte del
               // monto de la cuota, que es lo que se cobraría si se pagara hoy.
-              const fee = p.status === "PAID" ? 0 : lateFeeOf(p)
+              const fee = p.status === "PAID" ? 0 : chargedLateFee(p)
               return (
                 <div className="flex flex-col items-end">
                   <span className="font-mono font-medium text-[#111110]">${Number(p.amount).toLocaleString("es-AR")}</span>
@@ -833,7 +842,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
                 <div className="flex items-center gap-2 justify-end">
                   {p.student.phone1 && (
                     <a
-                      href={whatsappUrl(p.student.phone1, buildWhatsAppMessage(p, period, gymName, lateFeeOf(p)))}
+                      href={whatsappUrl(p.student.phone1, buildWhatsAppMessage(p, period, gymName, chargedLateFee(p)))}
                       target="_blank"
                       rel="noopener noreferrer"
                       title="Enviar recordatorio por WhatsApp"
@@ -846,7 +855,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
                   )}
                   <Button
                     variant="link"
-                    onClick={() => openPayModal(p.id)}
+                    onClick={() => openPayModal(p)}
                     disabled={busy}
                     className="disabled:opacity-40"
                   >
