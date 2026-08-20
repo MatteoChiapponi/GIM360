@@ -62,10 +62,40 @@ export function seedTwoGyms() {
   ])
 
   seed("group", [{ id: IDS.group1, gymId: IDS.gym1 }])
-  seed("payment", [
-    { id: IDS.payment1, gymId: IDS.gym1, studentId: IDS.student1, verified: false, status: "PENDING", amount: "10000", baseAmount: null, methodAdjustment: null, paymentMethod: null },
-  ])
+  seed("payment", [paymentRow()])
   seed("attendance", [{ id: IDS.attendance1, gymId: IDS.gym1, groupId: IDS.group1 }])
+}
+
+/** Período del pago del fixture y día de vencimiento del alumno. */
+export const PAYMENT_FIXTURE = {
+  period: new Date(Date.UTC(2026, 7, 1)),
+  periodKey: "2026-08",
+  dueDay: 10,
+} as const
+
+/**
+ * Fila de pago con forma completa: el fake de Prisma no resuelve `include`, así
+ * que el alumno viaja embebido igual que lo devolvería la query real.
+ */
+export function paymentRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: IDS.payment1,
+    gymId: IDS.gym1,
+    studentId: IDS.student1,
+    period: PAYMENT_FIXTURE.period,
+    verified: false,
+    status: "PENDING",
+    amount: "10000",
+    baseAmount: null,
+    methodAdjustment: null,
+    lateFee: null,
+    lateDays: null,
+    lateFeeWaived: false,
+    paymentMethod: null,
+    paidAt: null,
+    student: { dueDay: PAYMENT_FIXTURE.dueDay, lateFeeExempt: false },
+    ...overrides,
+  }
 }
 
 // ─── Sesiones ────────────────────────────────────────────────────────────────

@@ -71,6 +71,7 @@ export const db = {
   schedule: table(),
   payment: table(),
   paymentMethodConfig: table(),
+  lateFeeConfig: table(),
   fixedExpense: table(),
   cashClosing: table(),
   attendance: table(),

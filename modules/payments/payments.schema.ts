@@ -12,6 +12,8 @@ export const updatePaymentSchema = z.object({
   paidAt: z.string().datetime().nullable().optional(),
   notes: z.string().nullable().optional(),
   amount: z.number().positive().multipleOf(0.01).optional(),
+  /** Condona el recargo por mora de esta cuota puntual, sin tocar la regla del gimnasio. */
+  lateFeeWaived: z.boolean().optional(),
 })
 
 export type GeneratePaymentsInput = z.infer<typeof generatePaymentsSchema>

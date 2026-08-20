@@ -74,6 +74,7 @@ async function main() {
   await db.group.deleteMany({ where: { gymId: gym.id } })
   await db.fixedExpense.deleteMany({ where: { gymId: gym.id } })
   await db.paymentMethodConfig.deleteMany({ where: { gymId: gym.id } })
+  await db.lateFeeConfig.deleteMany({ where: { gymId: gym.id } })
   // Borrar el User arrastra al Receptionist por cascade
   await db.user.deleteMany({ where: { receptionist: { gymId: gym.id } } })
 
@@ -117,6 +118,23 @@ async function main() {
   })
 
   console.log("Payment methods: efectivo -5%, transferencia sin ajuste, tarjeta +10%")
+
+  // ── Late fee ───────────────────────────────────────────────────────────────
+
+  await db.lateFeeConfig.create({
+    data: {
+      gymId: gym.id,
+      enabled: true,
+      graceDays: 5,
+      feeType: "PERCENT",
+      feeValue: 5,
+      repeatEveryDays: 7,
+      maxCharges: 4,
+      maxFeeAmount: 6000,
+    },
+  })
+
+  console.log("Mora: 5% cada 7 días a partir del día 5, máximo 4 veces y tope $6.000")
 
   // ── Groups ─────────────────────────────────────────────────────────────────
 

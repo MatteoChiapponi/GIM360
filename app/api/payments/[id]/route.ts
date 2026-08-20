@@ -32,7 +32,11 @@ export const PATCH = withAuthParams<Params>([UserRole.OWNER, UserRole.RECEPTIONI
     return NextResponse.json({ error: "Gym is suspended or inactive" }, { status: 403 })
   }
 
-  const existing = await db.payment.findUnique({ where: { id } })
+  // El alumno viene con el pago: la mora se calcula sobre su día de vencimiento.
+  const existing = await db.payment.findUnique({
+    where: { id },
+    include: { student: { select: { dueDay: true, lateFeeExempt: true } } },
+  })
   if (!existing) {
     logger.warn("Payment not found", { paymentId: id, gymId })
     return NextResponse.json({ error: "Pago no encontrado" }, { status: 404 })

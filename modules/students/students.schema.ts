@@ -13,6 +13,8 @@ export const createStudentSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   dueDay: z.number().int().min(1).max(31).optional(),
+  /** Exime al alumno del recargo por mora del gimnasio (beca, arreglo particular). */
+  lateFeeExempt: z.boolean().optional(),
   birthDate: z.string().datetime().nullable().optional(),
   nationalId: z.string().nullable().optional(),
   phone1: phoneSchema,
