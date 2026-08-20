@@ -16,7 +16,8 @@ import { DataTable } from "@/components/ui/DataTable"
 import { FormModal } from "@/components/ui/FormModal"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 import {
-  DISCOUNT_TYPE_LABEL, formatDiscountValue, formatMoney, previewDiscountAmount, type DiscountType,
+  DISCOUNT_TYPE_LABEL, ON_TIME_ONLY_LABEL, formatDiscountValue, formatMoney, previewDiscountAmount,
+  type DiscountType,
 } from "@/lib/discounts-format"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -69,6 +70,7 @@ type EnrolledGroup = {
 
 type SimpleDiscount = {
   id: string; name: string; type: DiscountType; value: string; active: boolean
+  loseOnLatePayment: boolean
 }
 
 type DiscountAssignment = {
@@ -940,6 +942,11 @@ export default function StudentsView({ gymId, canManageDiscounts = false }: { gy
                                     <p className="text-xs text-[#68685F]">
                                       {DISCOUNT_TYPE_LABEL[a.discount.type]} · {formatDiscountValue(a.discount.type, a.discount.value)}
                                     </p>
+                                    {a.discount.loseOnLatePayment && (
+                                      <p className="mt-1 text-[10px] font-medium text-amber-700">
+                                        {ON_TIME_ONLY_LABEL} — no se aplica si la cuota vence
+                                      </p>
+                                    )}
                                   </div>
                                   <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${vigente ? "bg-emerald-100 text-emerald-700" : "bg-[#F0EFEB] text-[#68685F]"}`}>
                                     {vigente ? "Vigente" : "Fuera de vigencia"}

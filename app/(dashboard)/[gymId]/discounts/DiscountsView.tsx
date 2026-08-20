@@ -14,7 +14,10 @@ import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
 import { FormModal } from "@/components/ui/FormModal"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
-import { DISCOUNT_TYPE_LABEL, DISCOUNT_TYPE_HINT, formatDiscountValue, type DiscountType } from "@/lib/discounts-format"
+import {
+  DISCOUNT_TYPE_LABEL, DISCOUNT_TYPE_HINT, ON_TIME_ONLY_HINT, ON_TIME_ONLY_LABEL,
+  formatDiscountValue, type DiscountType,
+} from "@/lib/discounts-format"
 
 type Discount = {
   id: string
@@ -23,6 +26,7 @@ type Discount = {
   type: DiscountType
   value: string
   active: boolean
+  loseOnLatePayment: boolean
   createdAt: string
   _count: { students: number }
 }
@@ -33,9 +37,12 @@ type Form = {
   type: DiscountType
   value: string
   active: boolean
+  loseOnLatePayment: boolean
 }
 
-const EMPTY_FORM: Form = { name: "", description: "", type: "PERCENTAGE", value: "", active: true }
+const EMPTY_FORM: Form = {
+  name: "", description: "", type: "PERCENTAGE", value: "", active: true, loseOnLatePayment: false,
+}
 
 const TYPE_OPTIONS: DiscountType[] = ["PERCENTAGE", "FIXED_AMOUNT", "FIXED_PRICE"]
 
@@ -87,6 +94,7 @@ export default function DiscountsView({ gymId }: { gymId: string }) {
       type: f.type,
       value: Number(f.value),
       active: f.active,
+      loseOnLatePayment: f.loseOnLatePayment,
     }
   }
 
@@ -128,6 +136,7 @@ export default function DiscountsView({ gymId }: { gymId: string }) {
       type: d.type,
       value: String(d.value),
       active: d.active,
+      loseOnLatePayment: d.loseOnLatePayment,
     })
     setEditError(null)
   }
@@ -195,6 +204,20 @@ export default function DiscountsView({ gymId }: { gymId: string }) {
           <option value="0">Desactivado</option>
         </Select>
       </FormField>
+      <div className="sm:col-span-2">
+        <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-[#E5E4E0] bg-[#FAFAF9] px-3 py-2.5">
+          <input
+            type="checkbox"
+            checked={f.loseOnLatePayment}
+            onChange={(e) => set((p) => ({ ...p, loseOnLatePayment: e.target.checked }))}
+            className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-pointer rounded accent-[#111110]"
+          />
+          <span>
+            <span className="block text-sm font-medium text-[#111110]">{ON_TIME_ONLY_LABEL}</span>
+            <span className="mt-0.5 block text-xs text-[#A5A49D]">{ON_TIME_ONLY_HINT}</span>
+          </span>
+        </label>
+      </div>
       <div className="sm:col-span-2">
         <FormField label="Descripción">
           <Input
@@ -266,6 +289,11 @@ export default function DiscountsView({ gymId }: { gymId: string }) {
             render: (d) => (
               <div>
                 <span className="font-medium text-[#111110]">{d.name}</span>
+                {d.loseOnLatePayment && (
+                  <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                    {ON_TIME_ONLY_LABEL}
+                  </span>
+                )}
                 {d.description && <p className="text-xs text-[#A5A49D] mt-0.5">{d.description}</p>}
               </div>
             ),

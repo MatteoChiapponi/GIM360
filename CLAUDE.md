@@ -140,6 +140,12 @@ marcarlas pagadas: `baseAmount` es la suma de los grupos, `discountAmount` lo qu
 cambiaron. Las cuotas `PAID` nunca se recalculan — quedan congeladas con `discountName` como
 snapshot, que sobrevive incluso al borrado del descuento.
 
+Un descuento con `loseOnLatePayment` deja de aplicarse cuando la cuota pasa su vencimiento
+(`dueDay` del alumno). No se borra: la cuota conserva `discountId` y `discountName` con
+`discountAmount` en cero, así la vista puede mostrar cuál se perdió y el descuento vuelve solo si la
+cuota deja de estar vencida. `expireOverduePayments` mueve estado y descuento en el mismo paso, así
+que la regla se aplica también en las lecturas, sin esperar a que se regeneren las cuotas.
+
 Borrar un descuento lo desasigna de todos los alumnos (las `StudentDiscount` caen por cascade) y,
 en la misma transacción, devuelve al precio de lista las cuotas sin cobrar que lo tenían aplicado —
 sin esperar a la próxima sincronización, para que nadie cobre un descuento que ya no existe. Quitarle
@@ -181,6 +187,7 @@ Lo que sí se mockea: `@/lib/auth` (la sesión), `@/lib/logger` y los servicios 
 | `tests/receptionists.service.test.ts` | Alta transaccional, email duplicado, hash de contraseña, borrado por cascade |
 | `tests/discounts.calc.test.ts` | El cálculo del descuento: los tres tipos, los topes (nunca negativo, nunca recargo), vigencias y solapamientos |
 | `tests/discounts.service.test.ts` | Qué pasa al borrar/desasignar un descuento: las cuotas sin cobrar vuelven al precio de lista, las pagadas no se tocan |
+| `tests/payments.calc.test.ts` | La fecha de vencimiento de la cuota (tope de mes, bisiestos) y de la que dependen los descuentos por mora |
 
 Al agregar un endpoint que acepte más de un rol, sumalo al catálogo de `api-access.test.ts`: las
 listas `RECEPTIONIST_ALLOWED` / `RECEPTIONIST_DENIED` son la definición ejecutable de los permisos.

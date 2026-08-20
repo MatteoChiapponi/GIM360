@@ -41,3 +41,8 @@ export function previewDiscountAmount(base: number, type: DiscountType, value: n
     : base - value
   return Math.round(Math.min(Math.max(raw, 0), base) * 100) / 100
 }
+
+/** Leyenda del descuento que se pierde por mora, usada en las tres vistas. */
+export const ON_TIME_ONLY_LABEL = "Solo por pago en término"
+export const ON_TIME_ONLY_HINT =
+  "El descuento se aplica mientras la cuota no venza. Si el alumno se atrasa, esa cuota pasa a valer el precio completo — y si se corrige la fecha de vencimiento, el descuento vuelve."

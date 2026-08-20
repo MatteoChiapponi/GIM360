@@ -1,9 +1,11 @@
 import { DiscountType } from "@/app/generated/prisma/client"
 
-/** Un descuento reducido a lo que hace falta para calcular: tipo y valor. */
+/** Un descuento reducido a lo que hace falta para calcular. */
 export type DiscountRule = {
   type: DiscountType
   value: number
+  /** Si es true, se pierde cuando la cuota pasa su fecha de vencimiento. */
+  loseOnLatePayment: boolean
 }
 
 /** Asignación de un descuento a un alumno, con su vigencia en períodos mensuales. */
@@ -23,7 +25,7 @@ export function round2(n: number): number {
  * Nunca devuelve más que la base ni un número negativo: la cuota no puede
  * quedar por debajo de cero ni convertirse en un crédito a favor del alumno.
  */
-export function computeDiscountAmount(baseAmount: number, rule: DiscountRule): number {
+export function computeDiscountAmount(baseAmount: number, rule: Pick<DiscountRule, "type" | "value">): number {
   if (baseAmount <= 0) return 0
 
   const raw =
@@ -32,6 +34,18 @@ export function computeDiscountAmount(baseAmount: number, rule: DiscountRule): n
     : baseAmount - rule.value // FIXED_PRICE: `value` es el precio final
 
   return round2(Math.min(Math.max(raw, 0), baseAmount))
+}
+
+/**
+ * ¿Corresponde aplicar este descuento a una cuota que está vencida?
+ *
+ * Un descuento marcado como "solo por pago en término" no se aplica mientras la
+ * cuota esté vencida. No es un castigo permanente: la cuota guarda el descuento
+ * que le tocaba, así que si la fecha de vencimiento se corrige y deja de estar
+ * vencida, vuelve a aplicarse.
+ */
+export function discountApplies(rule: Pick<DiscountRule, "loseOnLatePayment">, isLate: boolean): boolean {
+  return !(rule.loseOnLatePayment && isLate)
 }
 
 /** Vigencias expresadas en períodos mensuales; `until` null = sin fecha de corte. */

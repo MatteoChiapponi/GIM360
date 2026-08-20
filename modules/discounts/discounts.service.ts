@@ -6,7 +6,7 @@ import type { AssignDiscountInput, CreateDiscountInput, UpdateAssignmentInput, U
 const assignmentWithDiscount = {
   include: {
     discount: {
-      select: { id: true, name: true, type: true, value: true, active: true, gymId: true },
+      select: { id: true, name: true, type: true, value: true, active: true, gymId: true, loseOnLatePayment: true },
     },
   },
 } as const

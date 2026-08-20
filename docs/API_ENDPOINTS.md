@@ -750,7 +750,7 @@ Cada entrada de `schedules`:
 
 **Logica:**
 - Si se pasa `studentId`: retorna todos los pagos de ese alumno (sin filtro por periodo).
-- Si no: retorna pagos del periodo indicado.
+- Si no: retorna pagos del periodo indicado. Antes de responder recalcula `PENDING`/`EXPIRED` segun el vencimiento y, con el estado, aplica o levanta los descuentos marcados como `loseOnLatePayment`.
 
 **Retorna:** `Payment[]`
 
@@ -770,7 +770,7 @@ Cada entrada de `schedules`:
 | `gymId`  | string (CUID) | Si |
 | `period` | string | Si (formato `YYYY-MM`) |
 
-**Logica:** Crea un registro `Payment` por cada alumno activo inscrito en al menos un grupo. `baseAmount` es la suma de `monthlyPrice` de cada grupo al que pertenece; si el alumno tiene un descuento vigente para ese periodo, se calcula `discountAmount` y `amount` queda en `baseAmount - discountAmount`. Tambien resincroniza las cuotas `PENDING`/`EXPIRED` cuando cambio la inscripcion a grupos o el descuento. Las cuotas `PAID` no se tocan: conservan el descuento con el que se cobraron.
+**Logica:** Crea un registro `Payment` por cada alumno activo inscrito en al menos un grupo. `baseAmount` es la suma de `monthlyPrice` de cada grupo al que pertenece; si el alumno tiene un descuento vigente para ese periodo, se calcula `discountAmount` y `amount` queda en `baseAmount - discountAmount`. Un descuento con `loseOnLatePayment` no se aplica si la cuota ya paso su vencimiento. Tambien resincroniza las cuotas `PENDING`/`EXPIRED` cuando cambio la inscripcion a grupos o el descuento. Las cuotas `PAID` no se tocan: conservan el descuento con el que se cobraron.
 
 **Retorna:** `Payment[]` (201 Created)
 
@@ -830,6 +830,8 @@ Los descuentos los configura el dueño y se aplican solos sobre la cuota de los 
 
 El descuento nunca deja la cuota por debajo de cero ni genera recargo.
 
+Ademas, cualquiera de los tres puede marcarse con `loseOnLatePayment: true` ("solo por pago en termino"): mientras la cuota no venza se aplica normal, y al vencer (pasado el `dueDay` del alumno) pasa a valer el precio completo. No es definitivo — la cuota conserva el vinculo con el descuento y `discountAmount` en cero, asi que si deja de estar vencida el descuento vuelve.
+
 ### `GET /api/discounts?gymId=xxx`
 
 **Para que sirve:** Listar los descuentos del gimnasio, con la cantidad de alumnos que tiene cada uno asignado.
@@ -859,6 +861,7 @@ El descuento nunca deja la cuota por debajo de cero ni genera recargo.
 | `value`       | number | Si (> 0; si es `PERCENTAGE`, <= 100) |
 | `description` | string | No (max 200) |
 | `active`      | boolean| No (default `true`) |
+| `loseOnLatePayment` | boolean | No (default `false`) — se pierde si la cuota vence |
 
 **Retorna:** `Discount` (201 Created). `409` si ya existe uno con ese nombre en el gimnasio.
 

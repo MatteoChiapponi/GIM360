@@ -1,6 +1,7 @@
 import { db } from "@/lib/db"
 import { parsePeriod } from "@/lib/period"
-import { computeDiscountAmount, resolveApplicableDiscount, round2 } from "@/modules/discounts/discounts.calc"
+import { computeDiscountAmount, discountApplies, resolveApplicableDiscount, round2 } from "@/modules/discounts/discounts.calc"
+import { dueDateFor } from "./payments.calc"
 import { getAssignmentsForStudents } from "@/modules/discounts/discounts.service"
 import type { PaymentMethod } from "@/app/generated/prisma/client"
 import type { UpdatePaymentInput } from "./payments.schema"
@@ -55,11 +56,13 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
 
   // Build map studentId → cuota esperada (precio de los grupos + descuento vigente)
   const expected = new Map<string, ExpectedCharge>()
+  const now = new Date()
   const newRecords = students.map((student) => {
     const charge = chargeFor(
       student.groups.reduce((sum, sg) => sum + Number(sg.group.monthlyPrice), 0),
       assignments.filter((a) => a.studentId === student.id),
       periodDate,
+      now > dueDateFor(period, student.dueDay),
     )
     expected.set(student.id, charge)
     return { gymId, studentId: student.id, period: periodDate, ...charge }
@@ -102,11 +105,13 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
   return getPaymentsByGym(gymId, period)
 }
 
-/** Aplica al precio base el descuento vigente del alumno, si tiene alguno. */
+/** Aplica al precio base el descuento vigente del alumno, si tiene alguno y si
+ *  corresponde aplicarlo (los de "pago en término" no valen sobre una cuota vencida). */
 function chargeFor(
   groupsTotal: number,
   studentAssignments: Awaited<ReturnType<typeof getAssignmentsForStudents>>,
   periodDate: Date,
+  isLate: boolean,
 ): ExpectedCharge {
   const baseAmount = round2(groupsTotal)
   const applicable = resolveApplicableDiscount(
@@ -121,7 +126,13 @@ function chargeFor(
     return { baseAmount, amount: baseAmount, discountAmount: 0, discountId: null, discountName: null }
   }
 
-  const discountAmount = computeDiscountAmount(baseAmount, applicable.discount)
+  // El descuento perdido por mora conserva el vínculo con `discountAmount` en
+  // cero: así la vista puede decir cuál se perdió, y si la cuota deja de estar
+  // vencida se recalcula sola contra la asignación, que sigue intacta.
+  const discountAmount = discountApplies(applicable.discount, isLate)
+    ? computeDiscountAmount(baseAmount, applicable.discount)
+    : 0
+
   return {
     baseAmount,
     amount: round2(baseAmount - discountAmount),
@@ -144,38 +155,50 @@ function isStale(
   )
 }
 
-/** Recalculates PENDING/EXPIRED status for all non-PAID payments in a period.
- *  PENDING → EXPIRED if due date passed. EXPIRED → PENDING if due date hasn't passed yet. */
+/**
+ * Recalcula el estado de las cuotas no cobradas de un período: PENDING → EXPIRED
+ * cuando pasó el vencimiento, y de vuelta a PENDING si dejó de estar vencida
+ * (por ejemplo, si se corrigió el día de cobro del alumno).
+ *
+ * Los descuentos de "pago en término" se caen acá junto con el estado, y vuelven
+ * si la cuota deja de estar vencida. Se guarda el vínculo con el descuento y se
+ * pone `discountAmount` en cero, así la vista puede mostrar cuál se perdió.
+ */
 export async function expireOverduePayments(gymId: string, period: string) {
   const periodDate = parsePeriod(period)
-  const [year, month] = period.split("-").map(Number)
   const now = new Date()
-  const lastDay = new Date(year, month, 0).getDate()
 
   const payments = await db.payment.findMany({
     where: { gymId, period: periodDate, status: { in: ["PENDING", "EXPIRED"] } },
-    include: { student: { select: { dueDay: true } } },
+    include: {
+      student: { select: { dueDay: true } },
+      discount: { select: { type: true, value: true, loseOnLatePayment: true } },
+    },
   })
 
-  const toExpire: string[] = []
-  const toRevert: string[] = []
+  const updates = payments.flatMap((payment) => {
+    const isLate = now > dueDateFor(period, payment.student.dueDay)
+    const data: Record<string, unknown> = {}
 
-  for (const p of payments) {
-    const due = new Date(year, month - 1, Math.min(p.student.dueDay, lastDay), 23, 59, 59)
-    if (p.status === "PENDING" && now > due) toExpire.push(p.id)
-    else if (p.status === "EXPIRED" && now <= due) toRevert.push(p.id)
-  }
+    const status = isLate ? "EXPIRED" : "PENDING"
+    if (payment.status !== status) data.status = status
 
-  await Promise.all([
-    toExpire.length > 0 && db.payment.updateMany({
-      where: { id: { in: toExpire } },
-      data: { status: "EXPIRED" },
-    }),
-    toRevert.length > 0 && db.payment.updateMany({
-      where: { id: { in: toRevert } },
-      data: { status: "PENDING" },
-    }),
-  ])
+    if (payment.discount?.loseOnLatePayment) {
+      const baseAmount = Number(payment.baseAmount)
+      const discountAmount = discountApplies(payment.discount, isLate)
+        ? computeDiscountAmount(baseAmount, { ...payment.discount, value: Number(payment.discount.value) })
+        : 0
+
+      if (Number(payment.discountAmount) !== discountAmount) {
+        data.discountAmount = discountAmount
+        data.amount = round2(baseAmount - discountAmount)
+      }
+    }
+
+    return Object.keys(data).length > 0 ? [db.payment.update({ where: { id: payment.id }, data })] : []
+  })
+
+  if (updates.length > 0) await Promise.all(updates)
 }
 
 /** Returns all payments for a gym in a given period, with student info.

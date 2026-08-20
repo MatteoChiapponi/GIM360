@@ -10,6 +10,7 @@ const baseDiscountSchema = z.object({
   type: z.nativeEnum(DiscountType),
   value: z.number().positive().multipleOf(0.01),
   active: z.boolean().optional(),
+  loseOnLatePayment: z.boolean().optional(),
 })
 
 /** Un porcentaje mayor a 100 dejaría la cuota en cero y confundiría al dueño:

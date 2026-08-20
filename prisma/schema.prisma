@@ -291,6 +291,9 @@ model Discount {
   type        DiscountType
   value       Decimal      @db.Decimal(10, 2)
   active      Boolean      @default(true)
+  /// Si es true, el descuento no se aplica a las cuotas que pasaron su fecha de
+  /// vencimiento: se pierde por pagar fuera de término y vuelve si se corrige la fecha.
+  loseOnLatePayment Boolean @default(false)
   createdAt   DateTime     @default(now())
 
   students StudentDiscount[]

@@ -9,7 +9,7 @@ import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
 import { Button } from "@/components/ui/Button"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
-import { formatMoney } from "@/lib/discounts-format"
+import { formatMoney, ON_TIME_ONLY_LABEL } from "@/lib/discounts-format"
 
 type PaymentStatus = "PENDING" | "PAID" | "EXPIRED"
 type PaymentMethod = "CASH" | "TRANSFER" | "CARD"
@@ -651,8 +651,23 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
             align: "right",
             render: (p) => {
               const discount = Number(p.discountAmount)
+
+              // Descuento que la cuota tenía asignado pero no se le aplicó por
+              // estar vencida: se muestra tachado, para que se entienda el monto.
               if (discount <= 0) {
-                return <span className="font-mono font-medium text-[#111110]">{formatMoney(p.amount)}</span>
+                return (
+                  <div className="flex flex-col items-end gap-0.5">
+                    <span className="font-mono font-medium text-[#111110]">{formatMoney(p.amount)}</span>
+                    {p.discountName && (
+                      <span
+                        className="rounded-full bg-[#F0EFEB] px-1.5 py-0.5 text-[10px] font-medium text-[#A5A49D] line-through"
+                        title={`${ON_TIME_ONLY_LABEL}: se perdió por pagar fuera de término`}
+                      >
+                        {p.discountName}
+                      </span>
+                    )}
+                  </div>
+                )
               }
               return (
                 <div className="flex flex-col items-end gap-0.5">
@@ -849,6 +864,11 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
               {payMethodPayment && (
                 <p className="text-sm text-[#68685F]">
                   {payMethodPayment.student.firstName} {payMethodPayment.student.lastName} — <span className="font-mono font-semibold">{formatMoney(payMethodPayment.amount)}</span>
+                  {Number(payMethodPayment.discountAmount) === 0 && payMethodPayment.discountName && (
+                    <span className="block text-xs text-amber-700">
+                      Perdió el descuento «{payMethodPayment.discountName}» por pagar fuera de término.
+                    </span>
+                  )}
                   {Number(payMethodPayment.discountAmount) > 0 && (
                     <span className="block text-xs text-[#A5A49D]">
                       <span className="line-through">{formatMoney(payMethodPayment.baseAmount)}</span>

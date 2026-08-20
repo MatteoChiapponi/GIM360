@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   computeDiscountAmount,
   coversPeriod,
+  discountApplies,
   rangesOverlap,
   resolveApplicableDiscount,
   type DiscountAssignment,
@@ -89,7 +90,7 @@ function assignment(from: string, until: string | null, active = true): Discount
   return {
     validFrom: parsePeriod(from),
     validUntil: until ? parsePeriod(until) : null,
-    discount: { type: "PERCENTAGE", value: 10, active },
+    discount: { type: "PERCENTAGE", value: 10, active, loseOnLatePayment: false },
   }
 }
 
@@ -111,5 +112,19 @@ describe("resolveApplicableDiscount", () => {
 
   it("sin asignaciones no hay descuento", () => {
     expect(resolveApplicableDiscount([], parsePeriod("2026-04"))).toBeNull()
+  })
+})
+
+describe("discountApplies", () => {
+  it("un descuento común se aplica igual sobre una cuota vencida", () => {
+    expect(discountApplies({ loseOnLatePayment: false }, true)).toBe(true)
+  })
+
+  it("uno de pago en término no se aplica si la cuota está vencida", () => {
+    expect(discountApplies({ loseOnLatePayment: true }, true)).toBe(false)
+  })
+
+  it("uno de pago en término se aplica mientras la cuota no venza", () => {
+    expect(discountApplies({ loseOnLatePayment: true }, false)).toBe(true)
   })
 })

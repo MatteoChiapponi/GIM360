@@ -442,7 +442,7 @@ async function main() {
   // la resincronización recalcula esas cuotas con el descuento aplicado. Las de
   // enero y febrero, ya pagadas, quedan como se cobraron.
 
-  const [dHermanos, dBeca] = await Promise.all([
+  const [dHermanos, dBeca, dProntoPago] = await Promise.all([
     db.discount.create({
       data: {
         gymId: gym.id,
@@ -464,6 +464,16 @@ async function main() {
     db.discount.create({
       data: {
         gymId: gym.id,
+        name: "Pronto pago",
+        description: "10% si la cuota se paga antes del vencimiento",
+        type: "PERCENTAGE",
+        value: 10,
+        loseOnLatePayment: true,
+      },
+    }),
+    db.discount.create({
+      data: {
+        gymId: gym.id,
         name: "Pago anual anticipado",
         description: "$5.000 de bonificación (temporada 2025, ya no se usa)",
         type: "FIXED_AMOUNT",
@@ -475,6 +485,7 @@ async function main() {
 
   const mateo = students.find((s) => s.firstName === "Mateo")!
   const camila = students.find((s) => s.firstName === "Camila")!
+  const renata = students.find((s) => s.firstName === "Renata")!
 
   await db.studentDiscount.createMany({
     data: [
@@ -492,10 +503,18 @@ async function main() {
         validUntil: firstOfMonth(2026, 8),
         notes: "Beca hasta fin de temporada",
       },
+      {
+        // Con la cuota vencida, este descuento se cae solo: sirve para ver el
+        // caso "perdió el descuento por pagar fuera de término" en la UI.
+        studentId: renata.id,
+        discountId: dProntoPago.id,
+        validFrom: firstOfMonth(2026, 3),
+        validUntil: null,
+      },
     ],
   })
 
-  console.log("Discounts: Hermanos (20%), Beca deportiva ($15k fijo), Pago anual (inactivo) — 2 alumnos con descuento")
+  console.log("Discounts: Hermanos (20%), Beca deportiva ($15k fijo), Pronto pago (10%, se pierde si vence), Pago anual (inactivo)")
 
   console.log(`\n--- GYM360 Central listo ---\n`)
 
