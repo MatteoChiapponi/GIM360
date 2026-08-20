@@ -139,8 +139,13 @@ acceso sin borrar el registro; `DELETE` borra el `User` y arrastra al `Reception
 
 Los tres valores de `PaymentMethod` son fijos, pero cada gimnasio configura cómo los usa en
 `PaymentMethodConfig` (`modules/payment-methods/`): si están habilitados y qué recargo o descuento
-en % se aplica al cobrar con ellos. La ausencia de fila equivale al default — habilitado y sin
-ajuste — así que un gimnasio nuevo funciona sin inicializar nada.
+en % se aplica al cobrar con ellos.
+
+Todo gimnasio tiene sus tres filas: las de los que ya existían las cargó la migración
+`20260820120000_backfill_payment_method_configs` (habilitados y sin ajuste, idempotente y sin pisar
+config existente), y las de los nuevos las crea `createGym` junto con el gimnasio.
+`getPaymentMethodConfigs` igual completa con el default lo que no encuentre, como red por si algún
+gimnasio entra por fuera del alta (un insert a mano, un restore).
 
 - **Configuración**: `/[gymId]/settings`, solo owner. `GET /api/payment-methods` lo leen owner y
   recepcionista (el recepcionista necesita saber con qué medios puede cobrar); `PATCH` es del owner.

@@ -1,4 +1,5 @@
 import { db } from "@/lib/db"
+import { initialPaymentMethodConfigs } from "@/modules/payment-methods/payment-methods.service"
 import type { CreateGymInput, UpdateGymInput } from "./gyms.schema"
 
 export async function getGymsByOwner(userId: string) {
@@ -15,7 +16,13 @@ export async function getGymById(id: string) {
 export async function createGym(userId: string, data: CreateGymInput) {
   const owner = await db.owner.findFirst({ where: { userId } })
   if (!owner) throw new Error("Owner not found")
-  return db.gym.create({ data: { ...data, ownerId: owner.id } })
+  return db.gym.create({
+    data: {
+      ...data,
+      ownerId: owner.id,
+      paymentMethodConfigs: { create: initialPaymentMethodConfigs() },
+    },
+  })
 }
 
 export async function updateGym(id: string, data: UpdateGymInput) {

@@ -22,8 +22,9 @@ vi.mock("@/modules/payments/payments.service", () => ({
 import { auth } from "@/lib/auth"
 import { updatePayment } from "@/modules/payments/payments.service"
 import { applyMethodAdjustment } from "@/modules/payment-methods/payment-methods.service"
+import { createGym } from "@/modules/gyms/gyms.service"
 import { IDS, SESSIONS, makeRequest, seedTwoGyms, withParams } from "./helpers"
-import { seed } from "./mocks/db"
+import { db, seed } from "./mocks/db"
 
 const mockAuth = vi.mocked(auth)
 const mockUpdatePayment = vi.mocked(updatePayment)
@@ -185,5 +186,23 @@ describe("Configuración de medios de pago", () => {
     )
 
     expect(res.status).toBe(400)
+  })
+})
+
+describe("Un gimnasio nuevo nace con los tres medios de pago", () => {
+  it("los crea junto con el gimnasio, habilitados y sin ajuste", async () => {
+    seed("owner", [{ id: "cowner00000000000000001", userId: IDS.ownerUser1 }])
+    db.gym.create.mockResolvedValue({ id: "cgym30000000000000000003" })
+
+    await createGym(IDS.ownerUser1, { name: "Gimnasio Nuevo" })
+
+    const { data } = db.gym.create.mock.calls[0][0] as {
+      data: { paymentMethodConfigs: { create: Record<string, unknown>[] } }
+    }
+    expect(data.paymentMethodConfigs.create).toEqual([
+      { method: "CASH", enabled: true, adjustmentType: "NONE", adjustmentPercent: 0 },
+      { method: "TRANSFER", enabled: true, adjustmentType: "NONE", adjustmentPercent: 0 },
+      { method: "CARD", enabled: true, adjustmentType: "NONE", adjustmentPercent: 0 },
+    ])
   })
 })

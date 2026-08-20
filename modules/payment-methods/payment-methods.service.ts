@@ -18,9 +18,23 @@ function defaultConfig(method: PaymentMethod): PaymentMethodConfig {
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 /**
+ * Filas iniciales de un gimnasio nuevo: los tres medios habilitados y sin ajuste.
+ * Se crean explícitamente al dar de alta el gimnasio para que la config exista
+ * desde el día cero (los gimnasios anteriores quedaron cargados por migración).
+ */
+export function initialPaymentMethodConfigs() {
+  return PAYMENT_METHODS.map((method) => ({
+    method,
+    enabled: true,
+    adjustmentType: PaymentAdjustmentType.NONE,
+    adjustmentPercent: 0,
+  }))
+}
+
+/**
  * Devuelve los tres medios de pago del gimnasio, completando con los defaults
- * los que todavía no tienen fila. No escribe: un gimnasio recién creado ya
- * responde con los tres habilitados sin necesidad de inicializarlo.
+ * los que no tengan fila. Lo normal es que las tres existan; el fallback cubre
+ * cualquier gimnasio cargado por fuera del alta (una inserción a mano, un restore).
  */
 export async function getPaymentMethodConfigs(gymId: string): Promise<PaymentMethodConfig[]> {
   const rows = await db.paymentMethodConfig.findMany({ where: { gymId } })
