@@ -241,8 +241,11 @@ function HealthIndexView({ health: h }: { health: HealthIndexMetrics }) {
 
 function GroupDetailView({ group: g, onBack }: { group: GroupMetrics; onBack: () => void }) {
   const collectionPct = g.projectedRevenue > 0 ? (g.collectedRevenue / g.projectedRevenue) * 100 : 0
-  const uncollected = g.projectedRevenue - g.collectedRevenue
-  const uncollectedPct = 100 - collectionPct
+  // Lo cobrado puede superar lo proyectado (un recargo por medio de pago, o alumnos
+  // que se dieron de baja después de pagar): ahí no queda nada pendiente, y el
+  // pendiente nunca es negativo.
+  const uncollected = Math.max(g.projectedRevenue - g.collectedRevenue, 0)
+  const uncollectedPct = Math.max(100 - collectionPct, 0)
   const costRevenuePct = g.collectedRevenue > 0 ? (g.trainerCost / g.collectedRevenue) * 100 : 0
   const marginPct = g.collectedRevenue > 0 ? (g.margin / g.collectedRevenue) * 100 : 0
   const marginColor = g.margin >= 0 ? "#10b981" : "#ef4444"

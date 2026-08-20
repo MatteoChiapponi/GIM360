@@ -9,9 +9,19 @@ import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
 import { Button } from "@/components/ui/Button"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
+import { PaymentMethodIcon } from "@/components/ui/PaymentMethodIcon"
+import {
+  PAYMENT_METHOD_VALUES,
+  PAYMENT_METHOD_LABEL as METHOD_LABEL,
+  adjustedAmount,
+  adjustmentLabel,
+  defaultPaymentMethodConfig,
+  formatMoney,
+  type PaymentMethodConfig,
+  type PaymentMethodValue as PaymentMethod,
+} from "@/lib/payment-methods"
 
 type PaymentStatus = "PENDING" | "PAID" | "EXPIRED"
-type PaymentMethod = "CASH" | "TRANSFER" | "CARD"
 
 type Payment = {
   id: string
@@ -19,6 +29,10 @@ type Payment = {
   status: PaymentStatus
   paidAt: string | null
   paymentMethod: PaymentMethod | null
+  /** Monto de la cuota antes del ajuste del medio de pago (null si todavía no se cobró) */
+  baseAmount: string | null
+  /** Ajuste aplicado por el medio de pago, firmado (+ recargo / − descuento) */
+  methodAdjustment: string | null
   verified: boolean
   cashClosingId: string | null
   student: { id: string; firstName: string; lastName: string; dueDay: number; phone1: string }
@@ -41,17 +55,23 @@ const STATUS_LABEL: Record<PaymentStatus, string> = { PAID: "Pagado", PENDING: "
 const STATUS_DOT: Record<PaymentStatus, string> = { PAID: "bg-emerald-500", PENDING: "bg-amber-400", EXPIRED: "bg-red-500" }
 const STATUS_TEXT: Record<PaymentStatus, string> = { PAID: "text-emerald-700", PENDING: "text-amber-700", EXPIRED: "text-red-700" }
 
-const METHOD_LABEL: Record<PaymentMethod, string> = {
-  CASH: "Efectivo",
-  TRANSFER: "Transferencia",
-  CARD: "Tarjeta",
+/**
+ * Desglose del cierre por medio de pago. `CashClosing` guarda un par de columnas
+ * fijas por medio, así que este mapeo es el único lugar a tocar si algún día se
+ * suman medios nuevos.
+ */
+function closingBreakdown(report: ClosingReport): { method: PaymentMethod; count: number; total: string }[] {
+  return [
+    { method: "CASH", count: report.cashCount, total: report.cashTotal },
+    { method: "TRANSFER", count: report.transferCount, total: report.transferTotal },
+    { method: "CARD", count: report.cardCount, total: report.cardTotal },
+  ]
 }
 
-const METHOD_BUTTONS: { value: PaymentMethod; label: string }[] = [
-  { value: "CASH", label: "Efectivo" },
-  { value: "TRANSFER", label: "Transferencia" },
-  { value: "CARD", label: "Tarjeta" },
-]
+/** Ajuste ya aplicado a un pago cobrado, para mostrarlo junto al método. */
+function paidAdjustment(p: Payment): number {
+  return p.methodAdjustment ? Number(p.methodAdjustment) : 0
+}
 
 function dueDate(period: string, dueDay: number): Date {
   const [year, month] = period.split("-").map(Number)
@@ -121,6 +141,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
       })
     return () => controller.abort()
   }, [gymId])
+
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(false)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
@@ -132,6 +153,21 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
   // Payment method modal state
   const [payMethodForId, setPayMethodForId] = useState<string | null>(null)
   const payMethodPayment = payMethodForId ? payments.find((p) => p.id === payMethodForId) : null
+
+  // Config de medios de pago del gimnasio (habilitados + recargo/descuento)
+  const [methodConfigs, setMethodConfigs] = useState<PaymentMethodConfig[]>(
+    PAYMENT_METHOD_VALUES.map(defaultPaymentMethodConfig),
+  )
+  const enabledMethods = methodConfigs.filter((c) => c.enabled)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch(`/api/payment-methods?gymId=${gymId}`, { signal: controller.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((configs) => { if (Array.isArray(configs)) setMethodConfigs(configs) })
+      .catch(() => { /* se cae al default: los tres habilitados sin ajuste */ })
+    return () => controller.abort()
+  }, [gymId])
 
   // Unmark confirmation
   const [confirmUnpayId, setConfirmUnpayId] = useState<string | null>(null)
@@ -375,9 +411,12 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
         )}
       </p>
       <div className="rounded-lg border border-[#E5E4E0] bg-[#FAFAF9] p-3 space-y-2">
-        {(["CASH", "TRANSFER", "CARD"] as PaymentMethod[]).map((method) => {
+        {/* El desglose sale de los pagos del cierre, no de los medios habilitados:
+            un medio deshabilitado hoy puede tener cobros viejos acá adentro. */}
+        {PAYMENT_METHOD_VALUES.filter((method) =>
+          includedInClosing.some((p) => p.paymentMethod === method),
+        ).map((method) => {
           const included = includedInClosing.filter((p) => p.paymentMethod === method)
-          if (included.length === 0) return null
           const total = included.reduce((s, p) => s + Number(p.amount), 0)
           return (
             <div key={method} className="flex items-center justify-between text-sm">
@@ -559,15 +598,13 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
             </span>
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-emerald-600">
-            {closingReport.cashCount > 0 && (
-              <span>Efectivo: <span className="font-mono font-semibold">${Number(closingReport.cashTotal).toLocaleString("es-AR")}</span> ({closingReport.cashCount})</span>
-            )}
-            {closingReport.transferCount > 0 && (
-              <span>Transferencia: <span className="font-mono font-semibold">${Number(closingReport.transferTotal).toLocaleString("es-AR")}</span> ({closingReport.transferCount})</span>
-            )}
-            {closingReport.cardCount > 0 && (
-              <span>Tarjeta: <span className="font-mono font-semibold">${Number(closingReport.cardTotal).toLocaleString("es-AR")}</span> ({closingReport.cardCount})</span>
-            )}
+            {closingBreakdown(closingReport)
+              .filter((b) => b.count > 0)
+              .map((b) => (
+                <span key={b.method}>
+                  {METHOD_LABEL[b.method]}: <span className="font-mono font-semibold">{formatMoney(Number(b.total))}</span> ({b.count})
+                </span>
+              ))}
           </div>
         </div>
       )}
@@ -676,11 +713,20 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
           {
             key: "method",
             header: "Método",
-            render: (p) => (
-              <span className="text-sm text-[#68685F]">
-                {p.paymentMethod ? METHOD_LABEL[p.paymentMethod] : "—"}
-              </span>
-            ),
+            render: (p) => {
+              if (!p.paymentMethod) return <span className="text-sm text-[#68685F]">—</span>
+              const adjustment = paidAdjustment(p)
+              return (
+                <span className="text-sm text-[#68685F]">
+                  {METHOD_LABEL[p.paymentMethod]}
+                  {adjustment !== 0 && (
+                    <span className={`ml-1 text-xs font-medium ${adjustment > 0 ? "text-amber-700" : "text-emerald-700"}`}>
+                      {adjustment > 0 ? "+" : "−"}{formatMoney(Math.abs(adjustment))}
+                    </span>
+                  )}
+                </span>
+              )
+            },
           },
           {
             key: "actions",
@@ -814,38 +860,38 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
               <p className="text-[15px] font-semibold text-[#111110]">Registrar pago</p>
               {payMethodPayment && (
                 <p className="text-sm text-[#68685F]">
-                  {payMethodPayment.student.firstName} {payMethodPayment.student.lastName} — <span className="font-mono font-semibold">${Number(payMethodPayment.amount).toLocaleString("es-AR")}</span>
+                  {payMethodPayment.student.firstName} {payMethodPayment.student.lastName} — <span className="font-mono font-semibold">{formatMoney(Number(payMethodPayment.amount))}</span>
                 </p>
               )}
               <p className="text-sm text-[#A5A49D]">Seleccioná el método de pago:</p>
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              {METHOD_BUTTONS.map((m) => (
-                <button
-                  key={m.value}
-                  onClick={() => handleMarkPaid(payMethodForId, m.value)}
-                  disabled={updatingId === payMethodForId}
-                  className="flex flex-col items-center gap-2 rounded-xl border border-[#E5E4E0] bg-white px-3 py-4 text-sm font-medium text-[#68685F] hover:border-[#111110] hover:text-[#111110] hover:bg-[#FAFAF9] transition-colors disabled:opacity-40 cursor-pointer"
-                >
-                  {m.value === "CASH" && (
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-6 w-6">
-                      <path fillRule="evenodd" d="M1 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4Zm12 4a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM4 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm13-1a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM1.75 14.5a.75.75 0 0 0 0 1.5c4.417 0 8.693.603 12.749 1.73 1.111.309 2.251-.512 2.251-1.696v-.784a.75.75 0 0 0-1.5 0v.784a.272.272 0 0 1-.35.25A49.043 49.043 0 0 0 1.75 14.5Z" clipRule="evenodd" />
-                    </svg>
-                  )}
-                  {m.value === "TRANSFER" && (
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-6 w-6">
-                      <path d="M13.024 9.25c.47 0 .827-.433.637-.863a4 4 0 0 0-4.094-2.364c-.468.05-.665.576-.43.984l1.08 1.868a.75.75 0 0 0 .649.375h2.158ZM7.84 7.758c-.236-.408-.79-.5-1.068-.12A3.982 3.982 0 0 0 6 10c0 .884.287 1.7.772 2.363.278.38.832.287 1.068-.12l1.078-1.868a.75.75 0 0 0 0-.75L7.839 7.758ZM9.138 12.993c-.235.408-.039.934.43.984a4 4 0 0 0 4.094-2.364c.19-.43-.168-.863-.638-.863h-2.158a.75.75 0 0 0-.65.375l-1.078 1.868Z" />
-                      <path fillRule="evenodd" d="M14.13 4.347l.644-1.117a.75.75 0 0 0-1.299-.75l-.644 1.116a20.944 20.944 0 0 0-5.662 0L6.525 2.48a.75.75 0 0 0-1.3.75l.645 1.117A20.943 20.943 0 0 0 1 10c0 1.68.211 3.31.6 4.866h.159c2.742 0 5.39-.472 7.84-1.339a21.489 21.489 0 0 0 7.842 1.339h.158c.39-1.556.601-3.186.601-4.866 0-2.07-.338-4.06-.958-5.924l-.112.27Zm-3.788 1.903a.75.75 0 0 0-1.299-.75l-1.28 2.217a.75.75 0 0 0 0 .75l1.28 2.217a.75.75 0 0 0 1.3-.75L9.262 8l1.08-1.867v.117ZM3.5 10a6.5 6.5 0 0 1 6.5-6.5c.834 0 1.64.158 2.377.446a.75.75 0 1 0 .523-1.406A7.956 7.956 0 0 0 10 2a8 8 0 1 0 7.934 7.071.75.75 0 1 0-1.49.178A6.5 6.5 0 0 1 3.5 10Z" clipRule="evenodd" />
-                    </svg>
-                  )}
-                  {m.value === "CARD" && (
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-6 w-6">
-                      <path fillRule="evenodd" d="M2.5 4A1.5 1.5 0 0 0 1 5.5V6h18v-.5A1.5 1.5 0 0 0 17.5 4h-15ZM19 8.5H1v6A1.5 1.5 0 0 0 2.5 16h15a1.5 1.5 0 0 0 1.5-1.5v-6ZM3 13.25a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5a.75.75 0 0 1-.75-.75Zm4.75-.75a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5h-3.5Z" clipRule="evenodd" />
-                    </svg>
-                  )}
-                  {m.label}
-                </button>
-              ))}
+            <div className={`grid gap-3 ${enabledMethods.length === 1 ? "grid-cols-1" : enabledMethods.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
+              {enabledMethods.map((config) => {
+                const base = payMethodPayment ? Number(payMethodPayment.amount) : 0
+                const total = adjustedAmount(base, config)
+                const badge = adjustmentLabel(config)
+                const isDiscount = config.adjustmentType === "DISCOUNT"
+
+                return (
+                  <button
+                    key={config.method}
+                    onClick={() => handleMarkPaid(payMethodForId, config.method)}
+                    disabled={updatingId === payMethodForId}
+                    className="flex flex-col items-center gap-2 rounded-xl border border-[#E5E4E0] bg-white px-3 py-4 text-sm font-medium text-[#68685F] hover:border-[#111110] hover:text-[#111110] hover:bg-[#FAFAF9] transition-colors disabled:opacity-40 cursor-pointer"
+                  >
+                    <PaymentMethodIcon method={config.method} />
+                    <span className="text-center leading-tight">{METHOD_LABEL[config.method]}</span>
+                    {badge && (
+                      <span className={`text-[10px] font-semibold ${isDiscount ? "text-emerald-700" : "text-amber-700"}`}>
+                        {badge}
+                      </span>
+                    )}
+                    {badge && (
+                      <span className="font-mono text-xs font-semibold text-[#111110]">{formatMoney(total)}</span>
+                    )}
+                  </button>
+                )
+              })}
             </div>
             <div className="flex justify-end pt-1">
               <Button variant="secondary" onClick={() => setPayMethodForId(null)}>
@@ -855,6 +901,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
           </div>
         </div>
       )}
+
     </div>
   )
 }

@@ -15,13 +15,17 @@ import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
 import { FormModal } from "@/components/ui/FormModal"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
+import {
+  PAYMENT_METHOD_LABEL,
+  formatMoney,
+  type PaymentMethodValue as PaymentMethod,
+} from "@/lib/payment-methods"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type StudentStatus = "ACTIVE" | "INACTIVE" | "TRIAL"
 type StudentFileType = "FICHA" | "APTO_MEDICO"
 type PaymentStatus = "PENDING" | "PAID" | "EXPIRED"
-type PaymentMethod = "CASH" | "TRANSFER" | "CARD"
 
 type StudentPayment = {
   id: string
@@ -29,6 +33,8 @@ type StudentPayment = {
   amount: string
   status: PaymentStatus
   paymentMethod: PaymentMethod | null
+  /** Ajuste del medio de pago ya aplicado al monto, firmado (+ recargo / − descuento) */
+  methodAdjustment: string | null
   paidAt: string | null
   verified: boolean
 }
@@ -803,9 +809,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
                           const statusLabels: Record<PaymentStatus, string> = {
                             PAID: "Pagado", PENDING: "Pendiente", EXPIRED: "Vencido",
                           }
-                          const methodLabels: Record<PaymentMethod, string> = {
-                            CASH: "Efectivo", TRANSFER: "Transferencia", CARD: "Tarjeta",
-                          }
+                          const adjustment = p.methodAdjustment ? Number(p.methodAdjustment) : 0
                           return (
                             <div
                               key={p.id}
@@ -814,7 +818,8 @@ export default function StudentsView({ gymId }: { gymId: string }) {
                               <div className="min-w-0">
                                 <p className="font-medium text-[#111110] capitalize">{periodLabel}</p>
                                 <p className="text-xs text-[#A5A49D]">
-                                  {p.paymentMethod ? methodLabels[p.paymentMethod] : "—"}
+                                  {p.paymentMethod ? PAYMENT_METHOD_LABEL[p.paymentMethod] : "—"}
+                                  {adjustment !== 0 && ` ${adjustment > 0 ? "+" : "−"}${formatMoney(Math.abs(adjustment))}`}
                                   {p.paidAt ? ` · ${new Date(p.paidAt).toLocaleDateString("es-AR")}` : ""}
                                   {p.verified ? " · ✓" : ""}
                                 </p>

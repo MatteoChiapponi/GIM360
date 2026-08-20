@@ -62,7 +62,9 @@ export function seedTwoGyms() {
   ])
 
   seed("group", [{ id: IDS.group1, gymId: IDS.gym1 }])
-  seed("payment", [{ id: IDS.payment1, gymId: IDS.gym1, studentId: IDS.student1, verified: false }])
+  seed("payment", [
+    { id: IDS.payment1, gymId: IDS.gym1, studentId: IDS.student1, verified: false, status: "PENDING", amount: "10000", baseAmount: null, methodAdjustment: null, paymentMethod: null },
+  ])
   seed("attendance", [{ id: IDS.attendance1, gymId: IDS.gym1, groupId: IDS.group1 }])
 }
 

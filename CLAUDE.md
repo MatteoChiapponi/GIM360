@@ -103,6 +103,7 @@ User (auth)
  │         │    ├── Schedule[]      (weekDays: DayOfWeek[], startTime/endTime: "HH:MM")
  │         │    └── Attendance[]
  │         ├── Payment[]  ── CashClosing[]
+ │         ├── PaymentMethodConfig[]  (uno por PaymentMethod; sin fila = habilitado y sin ajuste)
  │         ├── StudentFile[]
  │         └── FixedExpense[]
  ├── Trainer 1:1  (optional)
@@ -121,7 +122,7 @@ User (auth)
 `/[gymId]`, con la nav recortada a Alumnos / Asistencias / Cuotas (`RECEPTIONIST_SECTIONS` en
 `components/layout/NavLinks.tsx`). Puede hacer CRUD de alumnos (incluidas fichas y apto médico),
 inscribirlos en grupos, generar las cuotas del mes y registrar pagos, y cargar asistencias.
-Quedan fuera: cierres de caja, gastos, métricas, grupos y entrenadores. `active: false` corta el
+Quedan fuera: cierres de caja, gastos, métricas, grupos, entrenadores y la configuración del gimnasio. `active: false` corta el
 acceso sin borrar el registro; `DELETE` borra el `User` y arrastra al `Receptionist` por cascade.
 
 ### Enums (in schema.prisma)
@@ -130,8 +131,53 @@ acceso sin borrar el registro; `DELETE` borra el `User` y arrastra al `Reception
 - `StudentStatus`: `ACTIVE | INACTIVE | TRIAL`
 - `PaymentStatus`: `PENDING | PAID | EXPIRED`
 - `PaymentMethod`: `CASH | TRANSFER | CARD`
+- `PaymentAdjustmentType`: `NONE | SURCHARGE | DISCOUNT` — ajuste que cada gimnasio le configura a un medio de pago
 - `StudentFileType`: `FICHA | APTO_MEDICO`
 - `DayOfWeek`: `MONDAY | TUESDAY | WEDNESDAY | THURSDAY | FRIDAY | SATURDAY | SUNDAY`
+
+### Medios de pago
+
+Los tres valores de `PaymentMethod` son fijos, pero cada gimnasio configura cómo los usa en
+`PaymentMethodConfig` (`modules/payment-methods/`): si están habilitados y qué recargo o descuento
+en % se aplica al cobrar con ellos.
+
+Todo gimnasio tiene sus tres filas: las de los que ya existían las cargó la migración
+`20260820120000_backfill_payment_method_configs` (habilitados y sin ajuste, idempotente y sin pisar
+config existente), y las de los nuevos las crea `createGym` junto con el gimnasio.
+`getPaymentMethodConfigs` igual completa con el default lo que no encuentre, como red por si algún
+gimnasio entra por fuera del alta (un insert a mano, un restore).
+
+- **Configuración**: `/[gymId]/settings`, solo owner. `GET /api/payment-methods` lo leen owner y
+  recepcionista (el recepcionista necesita saber con qué medios puede cobrar); `PATCH` es del owner.
+  Siempre tiene que quedar al menos un medio habilitado — se valida sobre el resultado del merge,
+  no sobre lo que manda el body.
+- **Dónde vive qué**: `modules/payment-methods/` tiene el acceso a datos y `payments.pricing.ts`
+  resuelve qué montos guardar en un update de pago (el route handler solo traduce el resultado a
+  HTTP). `lib/payment-methods.ts` es la parte client-safe — valores, etiquetas y la fórmula del
+  ajuste — que importan tanto las vistas como el servicio, para que la vista previa y el cobro no
+  puedan calcular distinto.
+- **Cobro**: el ajuste lo calcula el backend en `PATCH /api/payments/:id`, nunca el cliente. Guarda
+  `baseAmount` (la cuota), `methodAdjustment` (firmado) y deja en `amount` el monto realmente
+  cobrado, que es el que suman cierres de caja y métricas. Cobrar con un medio deshabilitado da 400.
+  Al despagar, `amount` vuelve a `baseAmount` y el ajuste se limpia.
+
+**Dónde impacta que `amount` ahora traiga el ajuste** — `amount` sigue siendo "la plata que entró",
+así que casi todo lo aguas abajo ya era correcto:
+
+| Lugar | Efecto |
+|---|---|
+| `cash-closings.service.ts` | El desglose por medio suma el monto cobrado. Correcto sin cambios. |
+| `gym-metrics` | `totalCollectedRevenue` (PAID) incluye el ajuste; `totalPendingRevenue` (PENDING/EXPIRED) es la cuota sin ajustar. EBITDA queda bien: un recargo es ingreso real y un descuento es ingreso resignado. |
+| `groups-metrics` / `health-metrics` | Reparten `amount` entre los grupos del alumno a prorrata del `monthlyPrice`. Se mantiene así para que `Σ cobrado por grupo == cobrado del gimnasio`; si se repartiera `baseAmount`, el ajuste desaparecería de la vista por grupo. |
+| `MetricsView` (detalle de grupo) | Con recargo, lo cobrado puede superar a `projectedRevenue`: el pendiente se piso en 0 en vez de mostrarse negativo. |
+| `generateMonthlyPayments` | Solo re-sincroniza montos de PENDING/EXPIRED, que nunca tienen ajuste. Los PAID no se tocan. |
+| Recordatorio de WhatsApp | Avisa el monto de la cuota sin ajustar, que es lo correcto: el ajuste depende de con qué termine pagando. |
+
+**Si algún día se agregan medios de pago propios del gimnasio**, la config ya es por gimnasio y la
+UI se arma con lo que devuelve la API (nunca con una lista fija), así que el cambio queda acotado a:
+`PaymentMethod` (enum → tabla con `id` y `label`), las columnas fijas de `CashClosing`
+(`cashTotal`/`transferTotal`/`cardTotal` → tabla hija por medio, mapeadas hoy en `closingBreakdown`
+de `PaymentsView`), y `PAYMENT_METHOD_LABEL` / `PaymentMethodIcon`, que pasarían a salir de la config.
 
 ### Route groups
 - `app/(auth)/` — public routes (`/login`)
@@ -153,6 +199,7 @@ Lo que sí se mockea: `@/lib/auth` (la sesión), `@/lib/logger` y los servicios 
 | `tests/role-routing.test.ts` | Ruteo por rol del proxy + invariante de que ningún redirect encadena otro |
 | `tests/guards.test.ts` | `requireGymRole` y su fallback por rol |
 | `tests/receptionists.service.test.ts` | Alta transaccional, email duplicado, hash de contraseña, borrado por cascade |
+| `tests/payment-methods.test.ts` | Cálculo del recargo/descuento, cobro con la config del gimnasio, medio deshabilitado, invariante de "al menos uno habilitado" |
 
 Al agregar un endpoint que acepte más de un rol, sumalo al catálogo de `api-access.test.ts`: las
 listas `RECEPTIONIST_ALLOWED` / `RECEPTIONIST_DENIED` son la definición ejecutable de los permisos.
@@ -201,6 +248,7 @@ modules/                    ← Business logic, one folder per domain
   receptionists/
   groups/
   schedules/
+  payment-methods/          ← Config por gimnasio de cada medio de pago
 
 app/api/                    ← HTTP layer only (thin controllers)
   auth/[...nextauth]/       ← NextAuth internals, do not touch

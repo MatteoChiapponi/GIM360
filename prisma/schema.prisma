@@ -55,6 +55,12 @@ enum PaymentMethod {
   CARD
 }
 
+enum PaymentAdjustmentType {
+  NONE
+  SURCHARGE
+  DISCOUNT
+}
+
 // ─── Modelos ─────────────────────────────────────────────────────────────────
 
 model User {
@@ -99,6 +105,8 @@ model Gym {
   cashClosings  CashClosing[]
   studentFiles  StudentFile[]
   attendances   Attendance[]
+
+  paymentMethodConfigs PaymentMethodConfig[]
 
   @@index([ownerId])
 }
@@ -250,6 +258,10 @@ model Payment {
   amount        Decimal        @db.Decimal(10, 2)
   status        PaymentStatus  @default(PENDING)
   paymentMethod PaymentMethod?
+  // Monto de la cuota antes del ajuste del medio de pago, y el ajuste aplicado
+  // (positivo = recargo, negativo = descuento). Solo se completan al cobrar.
+  baseAmount       Decimal?    @db.Decimal(10, 2)
+  methodAdjustment Decimal?    @db.Decimal(10, 2)
   paidAt        DateTime?
   verified      Boolean        @default(false)
   cashClosingId String?
@@ -260,6 +272,24 @@ model Payment {
   @@unique([studentId, period])
   @@index([gymId, period, status])
   @@index([cashClosingId])
+}
+
+/// Configuración por gimnasio de cada medio de pago: si está habilitado y qué
+/// recargo o descuento (en %) se aplica sobre la cuota al cobrar con él.
+/// La ausencia de fila equivale al default: habilitado y sin ajuste.
+model PaymentMethodConfig {
+  id                String                @id @default(cuid())
+  gymId             String
+  gym               Gym                   @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  method            PaymentMethod
+  enabled           Boolean               @default(true)
+  adjustmentType    PaymentAdjustmentType @default(NONE)
+  adjustmentPercent Decimal               @default(0) @db.Decimal(5, 2)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@unique([gymId, method])
+  @@index([gymId])
 }
 
 model StudentFile {

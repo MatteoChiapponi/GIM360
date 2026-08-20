@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
-import { UserRole, PaymentMethod } from "@/app/generated/prisma/client"
+import { UserRole } from "@/app/generated/prisma/client"
 import { db } from "@/lib/db"
 import { withAuthParams } from "@/lib/with-auth"
 import { paymentBelongsToGym, gymIsActive, gymBelongsToUser, gymBelongsToOwner } from "@/modules/belongs/belongs.service"
 import { updatePayment, deletePayment } from "@/modules/payments/payments.service"
 import { updatePaymentSchema } from "@/modules/payments/payments.schema"
+import { resolvePaymentAmounts } from "@/modules/payments/payments.pricing"
 import { logger } from "@/lib/logger"
 
 type Params = { id: string }
@@ -31,9 +32,14 @@ export const PATCH = withAuthParams<Params>([UserRole.OWNER, UserRole.RECEPTIONI
     return NextResponse.json({ error: "Gym is suspended or inactive" }, { status: 403 })
   }
 
-  // Block modifications on verified (archived) payments
   const existing = await db.payment.findUnique({ where: { id } })
-  if (existing?.verified) {
+  if (!existing) {
+    logger.warn("Payment not found", { paymentId: id, gymId })
+    return NextResponse.json({ error: "Pago no encontrado" }, { status: 404 })
+  }
+
+  // Block modifications on verified (archived) payments
+  if (existing.verified) {
     logger.warn("Attempt to modify verified payment", { paymentId: id, gymId })
     return NextResponse.json({ error: "No se puede modificar un pago verificado" }, { status: 409 })
   }
@@ -51,16 +57,14 @@ export const PATCH = withAuthParams<Params>([UserRole.OWNER, UserRole.RECEPTIONI
     return NextResponse.json({ error: "paymentMethod es requerido al marcar como pagado" }, { status: 400 })
   }
 
-  // Clear paymentMethod when un-marking as PAID
-  if (parsed.data.status && parsed.data.status !== "PAID") {
-    const { paymentMethod: _, ...rest } = parsed.data
-    const result = await updatePayment(id, Object.assign(rest, { paymentMethod: null }))
-    logger.info("Payment updated", { id })
-    return NextResponse.json(result)
+  const pricing = await resolvePaymentAmounts(gymId, existing, parsed.data)
+  if (!pricing.ok) {
+    logger.warn("Disabled payment method", { paymentId: id, gymId, method: pricing.disabledMethod })
+    return NextResponse.json({ error: "El medio de pago no está habilitado" }, { status: 400 })
   }
 
-  const result = await updatePayment(id, parsed.data)
-  logger.info("Payment updated", { id })
+  const result = await updatePayment(id, { ...parsed.data, ...pricing.fields })
+  logger.info("Payment updated", { id, ...pricing.fields })
   return NextResponse.json(result)
 })
 
