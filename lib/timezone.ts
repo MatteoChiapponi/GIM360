@@ -95,11 +95,24 @@ function offsetMs(at: Date): number {
   )
 }
 
+const MS_PER_DAY = 86_400_000
+
 /**
  * El instante real que corresponde a una hora de pared argentina.
  *
  * Es el reemplazo de `new Date(year, month - 1, day)`, que arma la fecha en la
  * zona del runtime. `month` va de 1 a 12, como se lee, no como lo pide `Date`.
+ *
+ * Hoy Argentina no mueve el reloj, pero hasta 2009 sí, y todavía hay fechas de
+ * esa época en la base (la fecha de nacimiento de un entrenador, sin ir más
+ * lejos). En un cambio de hora, una hora de pared puede no existir —el 20 de
+ * octubre de 1991 el reloj saltó de las 23:59 del 19 a la 01:00 del 20, así que
+ * esa medianoche nunca pasó— o pasar dos veces. Se resuelve con el criterio
+ * estándar: se prueban los offsets de antes y de después del salto y gana el
+ * primero que reproduzca la hora pedida; si ninguno la reproduce, la hora cae en
+ * el hueco y se usa el offset previo, que corre el instante hacia adelante y lo
+ * deja en el día correcto. Es lo mismo que hace `AT TIME ZONE` en Postgres, así
+ * que la migración de datos y el código no pueden separarse.
  */
 export function argentinaDate(
   year: number,
@@ -111,13 +124,16 @@ export function argentinaDate(
   ms = 0,
 ): Date {
   const wall = Date.UTC(year, month - 1, day, hour, minute, second, ms)
-  // Dos pasadas: la primera estima el offset con la fecha aproximada, la
-  // segunda lo corrige si ese offset cambiaba justo ahí. Con Argentina, que no
-  // mueve el reloj, la segunda siempre confirma la primera.
-  let ts = wall
-  ts = wall - offsetMs(new Date(ts))
-  ts = wall - offsetMs(new Date(ts))
-  return new Date(ts)
+
+  const before = wall - offsetMs(new Date(wall - MS_PER_DAY))
+  const after = wall - offsetMs(new Date(wall + MS_PER_DAY))
+
+  // Un candidato sirve si, leído de vuelta, da exactamente la hora que se pidió.
+  const reproduces = (ts: number) => ts + offsetMs(new Date(ts)) === wall
+
+  if (reproduces(before)) return new Date(before)
+  if (reproduces(after)) return new Date(after)
+  return new Date(before)
 }
 
 /** "YYYY-MM-DD" del día argentino de ese instante. */

@@ -149,6 +149,19 @@ Dos convenciones de la DB que ya existían y no cambian:
 - `Attendance.date` se guarda como día calendario a medianoche **UTC**. El "hoy" que se manda
   desde la UI sale de `todayISO()`, así que es el día argentino.
 
+**Las columnas que guardan un día, no un instante**, sí van a medianoche **argentina** (03:00 UTC):
+`Trainer.startedAt`, `Student.birthDate`, `Student.trialEndsAt`, `Schedule.startDate` y
+`Schedule.endDate`. Venían a medianoche UTC porque se escribían con
+`new Date("2026-08-20").toISOString()`, que JavaScript parsea como UTC, y por eso se mostraban un
+día antes. La migración `20260820140000_shift_date_only_columns_to_argentina` corrigió las filas
+que ya estaban; para las nuevas, el camino es `fromISODate(inputDate)`.
+
+La migración usa `AT TIME ZONE` de Postgres y `argentinaDate()` resuelve el offset con Intl: los dos
+coinciden día por día entre 1970 y 2035, incluidos los cambios de hora que Argentina tuvo hasta
+2009. Hay tres días —15/10/1989, 21/10/1990 y 20/10/1991— en los que la medianoche **no existió**
+porque el reloj saltó de las 23:59 a la 01:00; `argentinaDate` los resuelve hacia adelante, que es
+lo mismo que hace Postgres. `tests/timezone.test.ts` lo verifica sobre los 24.000 días del rango.
+
 `tests/timezone.test.ts` corre los helpers con `process.env.TZ` en cuatro zonas distintas y exige
 el mismo resultado en todas: es la red que impide que vuelva a colarse un cálculo con hora local.
 

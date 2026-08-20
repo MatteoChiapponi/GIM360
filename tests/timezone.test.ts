@@ -195,6 +195,37 @@ describe("lib/timezone", () => {
     })
   })
 
+  it("resuelve las medianoches que nunca existieron", () => {
+    // Hasta 2009 Argentina movía el reloj, y en tres de esos saltos la
+    // medianoche se salteó entera: el 20/10/1991 el reloj pasó de las 23:59 del
+    // 19 a la 01:00 del 20. Pedir "el día 20 a las 00:00" tiene que caer igual
+    // dentro del día 20, no en el 19. Importa porque en la base hay fechas de
+    // esa época — la fecha de nacimiento de un entrenador, por ejemplo.
+    inEveryZone(() => {
+      for (const iso of ["1989-10-15", "1990-10-21", "1991-10-20"]) {
+        expect(toISODate(fromISODate(iso))).toBe(iso)
+      }
+      expect(fromISODate("1991-10-20").toISOString()).toBe("1991-10-20T03:00:00.000Z")
+    })
+  })
+
+  it("fromISODate redondea en todos los días de 1970 a 2035", () => {
+    // Barre los 24.000 días de una: cubre todos los cambios de hora que hubo,
+    // sin depender de acordarse de cuáles fueron.
+    inEveryZone(() => {
+      let cursor = Date.UTC(1970, 0, 1)
+      const end = Date.UTC(2035, 11, 31)
+      const fallos: string[] = []
+      while (cursor <= end) {
+        const d = new Date(cursor)
+        const iso = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`
+        if (toISODate(fromISODate(iso)) !== iso) fallos.push(iso)
+        cursor += 86_400_000
+      }
+      expect(fallos).toEqual([])
+    })
+  })
+
   it("todayISO y currentPeriod son coherentes entre sí", () => {
     inEveryZone(() => {
       expect(todayISO()).toMatch(/^\d{4}-\d{2}-\d{2}$/)
