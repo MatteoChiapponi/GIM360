@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 
 vi.mock("@/lib/db", () => import("./mocks/db"))
 
@@ -32,7 +32,7 @@ function seedPayment(overrides: PaymentOverrides = {}) {
     discountOverride: null,
     status: "EXPIRED",
     student: { dueDay: 10 },
-    discount: { type: "PERCENTAGE", value: 10, loseOnLatePayment: true },
+    discount: { type: "PERCENTAGE", value: 10, loseOnLatePayment: true, graceDays: 0 },
     ...overrides,
   }])
 }
@@ -113,5 +113,43 @@ describe("setDiscountOverride", () => {
 
   it("rechaza una cuota inexistente", async () => {
     await expect(setDiscountOverride("cuota-fantasma", true)).rejects.toThrow("PAYMENT_NOT_FOUND")
+  })
+})
+
+describe("setDiscountOverride con días de gracia", () => {
+  /** Cuota vencida el 10, con un descuento que tolera 5 días. */
+  function seedWithGrace(now: Date, graceDays = 5) {
+    vi.setSystemTime(now)
+    seedPayment({
+      period: new Date(Date.UTC(2026, 2, 1)),
+      status: "EXPIRED",
+      discount: { type: "PERCENTAGE", value: 10, loseOnLatePayment: true, graceDays },
+    })
+  }
+
+  afterEach(() => vi.useRealTimers())
+
+  it("dentro de la gracia el descuento sigue en pie, aunque la cuota figure vencida", async () => {
+    seedWithGrace(new Date(2026, 2, 14, 12, 0, 0))
+
+    await setDiscountOverride(PAYMENT_ID, null)
+
+    expect(updatedData()).toEqual({ discountOverride: null, discountAmount: 3000, amount: 27000 })
+  })
+
+  it("pasada la gracia se cae", async () => {
+    seedWithGrace(new Date(2026, 2, 16, 0, 1, 0))
+
+    await setDiscountOverride(PAYMENT_ID, null)
+
+    expect(updatedData()).toEqual({ discountOverride: null, discountAmount: 0, amount: 30000 })
+  })
+
+  it("el operario lo puede aplicar igual después de la gracia", async () => {
+    seedWithGrace(new Date(2026, 2, 20))
+
+    await setDiscountOverride(PAYMENT_ID, true)
+
+    expect(updatedData()).toEqual({ discountOverride: true, discountAmount: 3000, amount: 27000 })
   })
 })

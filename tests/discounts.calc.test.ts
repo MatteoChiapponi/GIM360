@@ -90,7 +90,7 @@ function assignment(from: string, until: string | null, active = true): Discount
   return {
     validFrom: parsePeriod(from),
     validUntil: until ? parsePeriod(until) : null,
-    discount: { type: "PERCENTAGE", value: 10, active, loseOnLatePayment: false },
+    discount: { type: "PERCENTAGE", value: 10, active, loseOnLatePayment: false, graceDays: 0 },
   }
 }
 

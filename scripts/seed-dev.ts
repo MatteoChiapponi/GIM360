@@ -465,10 +465,11 @@ async function main() {
       data: {
         gymId: gym.id,
         name: "Pronto pago",
-        description: "10% si la cuota se paga antes del vencimiento",
+        description: "10% si la cuota se paga dentro de los 5 días del vencimiento",
         type: "PERCENTAGE",
         value: 10,
         loseOnLatePayment: true,
+        graceDays: 5,
       },
     }),
     db.discount.create({
@@ -514,7 +515,7 @@ async function main() {
     ],
   })
 
-  console.log("Discounts: Hermanos (20%), Beca deportiva ($15k fijo), Pronto pago (10%, se pierde si vence), Pago anual (inactivo)")
+  console.log("Discounts: Hermanos (20%), Beca deportiva ($15k fijo), Pronto pago (10%, 5 días de gracia), Pago anual (inactivo)")
 
   console.log(`\n--- GYM360 Central listo ---\n`)
 

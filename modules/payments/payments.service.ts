@@ -1,7 +1,7 @@
 import { db } from "@/lib/db"
 import { parsePeriod } from "@/lib/period"
 import { computeDiscountAmount, discountApplies, resolveApplicableDiscount, round2 } from "@/modules/discounts/discounts.calc"
-import { dueDateFor } from "./payments.calc"
+import { dueDateFor, pastDiscountDeadline } from "./payments.calc"
 import { getAssignmentsForStudents } from "@/modules/discounts/discounts.service"
 import type { PaymentMethod } from "@/app/generated/prisma/client"
 import type { UpdatePaymentInput } from "./payments.schema"
@@ -62,7 +62,7 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
       student.groups.reduce((sum, sg) => sum + Number(sg.group.monthlyPrice), 0),
       assignments.filter((a) => a.studentId === student.id),
       periodDate,
-      now > dueDateFor(period, student.dueDay),
+      (graceDays: number) => pastDiscountDeadline(period, student.dueDay, graceDays, now),
       override,
     )
 
@@ -126,7 +126,9 @@ function chargeFor(
   groupsTotal: number,
   studentAssignments: Awaited<ReturnType<typeof getAssignmentsForStudents>>,
   periodDate: Date,
-  isLate: boolean,
+  /** El plazo depende de los días de gracia del descuento, que recién se
+   *  conocen una vez resuelto cuál corresponde. */
+  isPastDeadline: (graceDays: number) => boolean,
   override: boolean | null,
 ): ExpectedCharge {
   const baseAmount = round2(groupsTotal)
@@ -145,7 +147,7 @@ function chargeFor(
   // El descuento que no se aplica conserva el vínculo con `discountAmount` en
   // cero: así la vista puede decir cuál se perdió, y si la cuota deja de estar
   // vencida se recalcula sola contra la asignación, que sigue intacta.
-  const discountAmount = (override ?? discountApplies(applicable.discount, isLate))
+  const discountAmount = (override ?? discountApplies(applicable.discount, isPastDeadline(applicable.discount.graceDays)))
     ? computeDiscountAmount(baseAmount, applicable.discount)
     : 0
 
@@ -188,20 +190,22 @@ export async function expireOverduePayments(gymId: string, period: string) {
     where: { gymId, period: periodDate, status: { in: ["PENDING", "EXPIRED"] } },
     include: {
       student: { select: { dueDay: true } },
-      discount: { select: { type: true, value: true, loseOnLatePayment: true } },
+      discount: { select: { type: true, value: true, loseOnLatePayment: true, graceDays: true } },
     },
   })
 
   const updates = payments.flatMap((payment) => {
-    const isLate = now > dueDateFor(period, payment.student.dueDay)
     const data: Record<string, unknown> = {}
 
-    const status = isLate ? "EXPIRED" : "PENDING"
+    // El estado de la cuota se mide contra su vencimiento; el descuento, contra
+    // su propio plazo (vencimiento + días de gracia). Son dos relojes distintos.
+    const status = now > dueDateFor(period, payment.student.dueDay) ? "EXPIRED" : "PENDING"
     if (payment.status !== status) data.status = status
 
     if (payment.discount?.loseOnLatePayment) {
       const baseAmount = Number(payment.baseAmount)
-      const discountAmount = (payment.discountOverride ?? discountApplies(payment.discount, isLate))
+      const pastDeadline = pastDiscountDeadline(period, payment.student.dueDay, payment.discount.graceDays, now)
+      const discountAmount = (payment.discountOverride ?? discountApplies(payment.discount, pastDeadline))
         ? computeDiscountAmount(baseAmount, { ...payment.discount, value: Number(payment.discount.value) })
         : 0
 
@@ -262,7 +266,7 @@ export async function setDiscountOverride(id: string, override: boolean | null) 
     where: { id },
     include: {
       student: { select: { dueDay: true } },
-      discount: { select: { type: true, value: true, loseOnLatePayment: true } },
+      discount: { select: { type: true, value: true, loseOnLatePayment: true, graceDays: true } },
     },
   })
 
@@ -272,8 +276,12 @@ export async function setDiscountOverride(id: string, override: boolean | null) 
   if (!payment.discount) throw new Error("PAYMENT_WITHOUT_DISCOUNT")
 
   const baseAmount = Number(payment.baseAmount)
-  const isLate = new Date() > dueDateFor(payment.period.toISOString().slice(0, 7), payment.student.dueDay)
-  const applies = override ?? discountApplies(payment.discount, isLate)
+  const pastDeadline = pastDiscountDeadline(
+    payment.period.toISOString().slice(0, 7),
+    payment.student.dueDay,
+    payment.discount.graceDays,
+  )
+  const applies = override ?? discountApplies(payment.discount, pastDeadline)
   const discountAmount = applies
     ? computeDiscountAmount(baseAmount, { ...payment.discount, value: Number(payment.discount.value) })
     : 0

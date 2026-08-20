@@ -140,11 +140,14 @@ marcarlas pagadas: `baseAmount` es la suma de los grupos, `discountAmount` lo qu
 cambiaron. Las cuotas `PAID` nunca se recalculan — quedan congeladas con `discountName` como
 snapshot, que sobrevive incluso al borrado del descuento.
 
-Un descuento con `loseOnLatePayment` deja de aplicarse cuando la cuota pasa su vencimiento
-(`dueDay` del alumno). No se borra: la cuota conserva `discountId` y `discountName` con
-`discountAmount` en cero, así la vista puede mostrar cuál se perdió y el descuento vuelve solo si la
-cuota deja de estar vencida. `expireOverduePayments` mueve estado y descuento en el mismo paso, así
-que la regla se aplica también en las lecturas, sin esperar a que se regeneren las cuotas.
+Un descuento con `loseOnLatePayment` deja de aplicarse cuando la cuota pasa **su** plazo:
+`discountDeadlineFor` = vencimiento (`dueDay`) + `graceDays` del descuento. Son dos relojes
+distintos y conviene no confundirlos — la cuota pasa a `EXPIRED` en su vencimiento, mientras el
+descuento puede seguir en pie durante la gracia. No se borra: la cuota conserva `discountId` y
+`discountName` con `discountAmount` en cero, así la vista puede mostrar cuál se perdió y el descuento
+vuelve solo si el plazo deja de estar pasado. `expireOverduePayments` mueve estado y descuento en el
+mismo paso, así que la regla se aplica también en las lecturas, sin esperar a que se regeneren las
+cuotas.
 
 Sobre cada cuota, `Payment.discountOverride` es la última palabra: `null` = automático (manda la
 regla), `true` = aplicarlo igual, `false` = no aplicarlo. Lo setea `PATCH /api/payments/:id` con

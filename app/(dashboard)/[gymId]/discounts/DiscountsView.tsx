@@ -16,7 +16,7 @@ import { FormModal } from "@/components/ui/FormModal"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 import {
   DISCOUNT_TYPE_LABEL, DISCOUNT_TYPE_HINT, ON_TIME_ONLY_HINT, ON_TIME_ONLY_LABEL,
-  formatDiscountValue, type DiscountType,
+  formatDiscountValue, formatGracePeriod, type DiscountType,
 } from "@/lib/discounts-format"
 
 type Discount = {
@@ -27,6 +27,7 @@ type Discount = {
   value: string
   active: boolean
   loseOnLatePayment: boolean
+  graceDays: number
   createdAt: string
   _count: { students: number }
 }
@@ -38,10 +39,12 @@ type Form = {
   value: string
   active: boolean
   loseOnLatePayment: boolean
+  graceDays: string
 }
 
 const EMPTY_FORM: Form = {
-  name: "", description: "", type: "PERCENTAGE", value: "", active: true, loseOnLatePayment: false,
+  name: "", description: "", type: "PERCENTAGE", value: "", active: true,
+  loseOnLatePayment: false, graceDays: "0",
 }
 
 const TYPE_OPTIONS: DiscountType[] = ["PERCENTAGE", "FIXED_AMOUNT", "FIXED_PRICE"]
@@ -95,6 +98,7 @@ export default function DiscountsView({ gymId }: { gymId: string }) {
       value: Number(f.value),
       active: f.active,
       loseOnLatePayment: f.loseOnLatePayment,
+      graceDays: f.loseOnLatePayment ? Number(f.graceDays || 0) : 0,
     }
   }
 
@@ -103,6 +107,11 @@ export default function DiscountsView({ gymId }: { gymId: string }) {
     if (!f.value) return "El valor es obligatorio."
     if (Number(f.value) <= 0) return "El valor debe ser mayor a cero."
     if (f.type === "PERCENTAGE" && Number(f.value) > 100) return "Un descuento porcentual no puede superar el 100%."
+    if (f.loseOnLatePayment) {
+      const grace = Number(f.graceDays || 0)
+      if (!Number.isInteger(grace) || grace < 0) return "Los días de gracia tienen que ser un número entero de 0 o más."
+      if (grace > 60) return "Los días de gracia no pueden pasar de 60."
+    }
     return null
   }
 
@@ -137,6 +146,7 @@ export default function DiscountsView({ gymId }: { gymId: string }) {
       value: String(d.value),
       active: d.active,
       loseOnLatePayment: d.loseOnLatePayment,
+      graceDays: String(d.graceDays),
     })
     setEditError(null)
   }
@@ -217,6 +227,23 @@ export default function DiscountsView({ gymId }: { gymId: string }) {
             <span className="mt-0.5 block text-xs text-[#A5A49D]">{ON_TIME_ONLY_HINT}</span>
           </span>
         </label>
+
+        {f.loseOnLatePayment && (
+          <div className="mt-2 rounded-lg border border-[#E5E4E0] bg-white px-3 py-2.5">
+            <FormField label="Días de gracia">
+              <NumberInput
+                integer
+                value={f.graceDays}
+                onChange={(e) => set((p) => ({ ...p, graceDays: e.target.value }))}
+                placeholder="Ej: 5"
+              />
+            </FormField>
+            <p className="mt-2 text-xs text-[#A5A49D]">
+              {formatGracePeriod(Number(f.graceDays || 0))}. La cuota sigue figurando como vencida
+              desde su fecha de vencimiento; esto solo corre el plazo del descuento.
+            </p>
+          </div>
+        )}
       </div>
       <div className="sm:col-span-2">
         <FormField label="Descripción">
@@ -290,8 +317,12 @@ export default function DiscountsView({ gymId }: { gymId: string }) {
               <div>
                 <span className="font-medium text-[#111110]">{d.name}</span>
                 {d.loseOnLatePayment && (
-                  <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                  <span
+                    className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700"
+                    title={formatGracePeriod(d.graceDays)}
+                  >
                     {ON_TIME_ONLY_LABEL}
+                    {d.graceDays > 0 ? ` · ${d.graceDays}d de gracia` : ""}
                   </span>
                 )}
                 {d.description && <p className="text-xs text-[#A5A49D] mt-0.5">{d.description}</p>}

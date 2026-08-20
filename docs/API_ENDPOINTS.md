@@ -750,7 +750,7 @@ Cada entrada de `schedules`:
 
 **Logica:**
 - Si se pasa `studentId`: retorna todos los pagos de ese alumno (sin filtro por periodo).
-- Si no: retorna pagos del periodo indicado. Antes de responder recalcula `PENDING`/`EXPIRED` segun el vencimiento y, con el estado, aplica o levanta los descuentos marcados como `loseOnLatePayment`.
+- Si no: retorna pagos del periodo indicado. Antes de responder recalcula `PENDING`/`EXPIRED` segun el vencimiento y, por separado, aplica o levanta los descuentos marcados como `loseOnLatePayment` segun su propio plazo (vencimiento + `graceDays`).
 
 **Retorna:** `Payment[]`
 
@@ -770,7 +770,7 @@ Cada entrada de `schedules`:
 | `gymId`  | string (CUID) | Si |
 | `period` | string | Si (formato `YYYY-MM`) |
 
-**Logica:** Crea un registro `Payment` por cada alumno activo inscrito en al menos un grupo. `baseAmount` es la suma de `monthlyPrice` de cada grupo al que pertenece; si el alumno tiene un descuento vigente para ese periodo, se calcula `discountAmount` y `amount` queda en `baseAmount - discountAmount`. Un descuento con `loseOnLatePayment` no se aplica si la cuota ya paso su vencimiento. Tambien resincroniza las cuotas `PENDING`/`EXPIRED` cuando cambio la inscripcion a grupos o el descuento. Las cuotas `PAID` no se tocan: conservan el descuento con el que se cobraron.
+**Logica:** Crea un registro `Payment` por cada alumno activo inscrito en al menos un grupo. `baseAmount` es la suma de `monthlyPrice` de cada grupo al que pertenece; si el alumno tiene un descuento vigente para ese periodo, se calcula `discountAmount` y `amount` queda en `baseAmount - discountAmount`. Un descuento con `loseOnLatePayment` no se aplica si la cuota ya paso su plazo (vencimiento + `graceDays`). Tambien resincroniza las cuotas `PENDING`/`EXPIRED` cuando cambio la inscripcion a grupos o el descuento. Las cuotas `PAID` no se tocan: conservan el descuento con el que se cobraron.
 
 **Retorna:** `Payment[]` (201 Created)
 
@@ -838,7 +838,9 @@ Los descuentos los configura el dueño y se aplican solos sobre la cuota de los 
 
 El descuento nunca deja la cuota por debajo de cero ni genera recargo.
 
-Ademas, cualquiera de los tres puede marcarse con `loseOnLatePayment: true` ("solo por pago en termino"): mientras la cuota no venza se aplica normal, y al vencer (pasado el `dueDay` del alumno) pasa a valer el precio completo. No es definitivo — la cuota conserva el vinculo con el descuento y `discountAmount` en cero, asi que si deja de estar vencida el descuento vuelve.
+Ademas, cualquiera de los tres puede marcarse con `loseOnLatePayment: true` ("solo por pago en termino"): el descuento se pierde cuando la cuota pasa **su plazo**, que es el vencimiento (`dueDay` del alumno) mas los `graceDays` configurados. Son dos relojes distintos: la cuota figura como `EXPIRED` desde su vencimiento, pero el descuento sigue en pie mientras dure la gracia. Con `graceDays: 0` los dos plazos coinciden.
+
+No es definitivo — la cuota conserva el vinculo con el descuento y `discountAmount` en cero, asi que si el plazo deja de estar pasado, el descuento vuelve.
 
 Esa regla es el automatico. Sobre cada cuota concreta, quien la cobra puede decidir a mano con `discountOverride` (ver `PATCH /api/payments/:id`), y esa decision le gana a la regla.
 
@@ -871,7 +873,8 @@ Esa regla es el automatico. Sobre cada cuota concreta, quien la cobra puede deci
 | `value`       | number | Si (> 0; si es `PERCENTAGE`, <= 100) |
 | `description` | string | No (max 200) |
 | `active`      | boolean| No (default `true`) |
-| `loseOnLatePayment` | boolean | No (default `false`) — se pierde si la cuota vence |
+| `loseOnLatePayment` | boolean | No (default `false`) — se pierde al pasar su plazo |
+| `graceDays`   | number | No (default `0`, entero 0-60) — dias de tolerancia despues del vencimiento antes de perderlo |
 
 **Retorna:** `Discount` (201 Created). `409` si ya existe uno con ese nombre en el gimnasio.
 

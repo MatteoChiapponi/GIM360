@@ -4,8 +4,10 @@ import { DiscountType } from "@/app/generated/prisma/client"
 export type DiscountRule = {
   type: DiscountType
   value: number
-  /** Si es true, se pierde cuando la cuota pasa su fecha de vencimiento. */
+  /** Si es true, se pierde cuando la cuota pasa el plazo para pagarlo. */
   loseOnLatePayment: boolean
+  /** Días de tolerancia después del vencimiento de la cuota antes de perderlo. */
+  graceDays: number
 }
 
 /** Asignación de un descuento a un alumno, con su vigencia en períodos mensuales. */
@@ -37,15 +39,19 @@ export function computeDiscountAmount(baseAmount: number, rule: Pick<DiscountRul
 }
 
 /**
- * ¿Corresponde aplicar este descuento a una cuota que está vencida?
+ * ¿Corresponde aplicar este descuento, dado si ya se pasó su plazo?
  *
- * Un descuento marcado como "solo por pago en término" no se aplica mientras la
- * cuota esté vencida. No es un castigo permanente: la cuota guarda el descuento
- * que le tocaba, así que si la fecha de vencimiento se corrige y deja de estar
- * vencida, vuelve a aplicarse.
+ * El plazo no es el vencimiento de la cuota sino el vencimiento más los días de
+ * gracia del descuento (`discountDeadlineFor` en el módulo de cuotas): la cuota
+ * puede figurar como Vencida y el descuento seguir en pie mientras dure la
+ * gracia. No es un castigo permanente — la cuota guarda el descuento que le
+ * tocaba, así que si el plazo deja de estar pasado, vuelve a aplicarse.
  */
-export function discountApplies(rule: Pick<DiscountRule, "loseOnLatePayment">, isLate: boolean): boolean {
-  return !(rule.loseOnLatePayment && isLate)
+export function discountApplies(
+  rule: Pick<DiscountRule, "loseOnLatePayment">,
+  pastDeadline: boolean,
+): boolean {
+  return !(rule.loseOnLatePayment && pastDeadline)
 }
 
 /** Vigencias expresadas en períodos mensuales; `until` null = sin fecha de corte. */

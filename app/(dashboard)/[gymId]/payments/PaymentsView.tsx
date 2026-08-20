@@ -692,7 +692,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
                         title={
                           p.discountOverride === false
                             ? "El descuento se sacó a mano en esta cuota"
-                            : `${ON_TIME_ONLY_LABEL}: se perdió por pagar fuera de término`
+                            : `${ON_TIME_ONLY_LABEL}: pasó el plazo para pagarlo con descuento`
                         }
                       >
                         {p.discountName}
@@ -929,9 +929,9 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
                 <p className="text-xs text-[#68685F]">
                   {Number(payMethodPayment.discountAmount) > 0
                     ? <>Se descuentan <span className="font-mono font-semibold text-emerald-700">{formatMoney(payMethodPayment.discountAmount)}</span> sobre {formatMoney(payMethodPayment.baseAmount)}.</>
-                    : payMethodPayment.status === "EXPIRED"
-                      ? "No se aplica porque la cuota está vencida."
-                      : "No se está aplicando a esta cuota."}
+                    : payMethodPayment.discountOverride === false
+                      ? "Se sacó a mano en esta cuota."
+                      : "No se aplica: pasó el plazo para pagarlo con descuento."}
                   {payMethodPayment.discountOverride !== null && (
                     <span className="text-[#A5A49D]"> · decisión manual</span>
                   )}

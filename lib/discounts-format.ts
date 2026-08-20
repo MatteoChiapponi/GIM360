@@ -45,4 +45,11 @@ export function previewDiscountAmount(base: number, type: DiscountType, value: n
 /** Leyenda del descuento que se pierde por mora, usada en las tres vistas. */
 export const ON_TIME_ONLY_LABEL = "Solo por pago en término"
 export const ON_TIME_ONLY_HINT =
-  "El descuento se aplica mientras la cuota no venza. Si el alumno se atrasa, esa cuota pasa a valer el precio completo — y si se corrige la fecha de vencimiento, el descuento vuelve."
+  "El descuento se pierde si el alumno paga pasado el plazo. El plazo es el vencimiento de la cuota más los días de gracia que definas."
+
+/** Cómo se lee el plazo de un descuento que se pierde por mora. */
+export function formatGracePeriod(graceDays: number): string {
+  if (graceDays === 0) return "Se pierde el mismo día que vence la cuota"
+  if (graceDays === 1) return "Se pierde 1 día después del vencimiento"
+  return `Se pierde ${graceDays} días después del vencimiento`
+}

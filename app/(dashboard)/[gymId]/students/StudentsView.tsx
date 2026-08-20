@@ -16,8 +16,8 @@ import { DataTable } from "@/components/ui/DataTable"
 import { FormModal } from "@/components/ui/FormModal"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 import {
-  DISCOUNT_TYPE_LABEL, ON_TIME_ONLY_LABEL, formatDiscountValue, formatMoney, previewDiscountAmount,
-  type DiscountType,
+  DISCOUNT_TYPE_LABEL, ON_TIME_ONLY_LABEL, formatDiscountValue, formatGracePeriod, formatMoney,
+  previewDiscountAmount, type DiscountType,
 } from "@/lib/discounts-format"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -71,6 +71,7 @@ type EnrolledGroup = {
 type SimpleDiscount = {
   id: string; name: string; type: DiscountType; value: string; active: boolean
   loseOnLatePayment: boolean
+  graceDays: number
 }
 
 type DiscountAssignment = {
@@ -944,7 +945,7 @@ export default function StudentsView({ gymId, canManageDiscounts = false }: { gy
                                     </p>
                                     {a.discount.loseOnLatePayment && (
                                       <p className="mt-1 text-[10px] font-medium text-amber-700">
-                                        {ON_TIME_ONLY_LABEL} — no se aplica si la cuota vence
+                                        {ON_TIME_ONLY_LABEL} — {formatGracePeriod(a.discount.graceDays).toLowerCase()}
                                       </p>
                                     )}
                                   </div>

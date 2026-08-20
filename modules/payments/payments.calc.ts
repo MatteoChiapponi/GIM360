@@ -21,3 +21,30 @@ export function dueDateFor(period: string, dueDay: number): Date {
 export function isOverdue(period: string, dueDay: number, now: Date = new Date()): boolean {
   return now > dueDateFor(period, dueDay)
 }
+
+/**
+ * Hasta cuándo se conserva un descuento de "pago en término": el vencimiento de
+ * la cuota más los días de gracia del descuento.
+ *
+ * Es un plazo aparte del vencimiento: la cuota puede figurar como Vencida y el
+ * descuento seguir en pie mientras esté dentro de la gracia. Con `graceDays: 0`
+ * los dos plazos coinciden.
+ *
+ * Los días se suman sobre el día del mes, no en milisegundos, así un cambio de
+ * horario de verano no corre el plazo — y si se pasan de mes, `Date` lo resuelve.
+ */
+export function discountDeadlineFor(period: string, dueDay: number, graceDays: number): Date {
+  const [year, month] = period.split("-").map(Number)
+  const lastDay = new Date(year, month, 0).getDate()
+  return new Date(year, month - 1, Math.min(dueDay, lastDay) + graceDays, 23, 59, 59)
+}
+
+/** ¿Se pasó el plazo para conservar el descuento de esa cuota? */
+export function pastDiscountDeadline(
+  period: string,
+  dueDay: number,
+  graceDays: number,
+  now: Date = new Date(),
+): boolean {
+  return now > discountDeadlineFor(period, dueDay, graceDays)
+}
