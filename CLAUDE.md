@@ -44,6 +44,8 @@ groupBelongsToGym(groupId, gymId)         // group.gymId === gymId
 scheduleBelongsToGroup(scheduleId, groupId)
 trainerBelongsToGroup(trainerId, groupId)
 studentBelongsToGroup(studentId, groupId)
+discountBelongsToGym(discountId, gymId)
+assignmentBelongsToStudent(assignmentId, studentId)  // StudentDiscount.studentId === studentId
 ```
 
 En handlers que aceptan más de un rol (ej. `[OWNER, RECEPTIONIST]`), el belongs va con
@@ -95,7 +97,7 @@ User (auth)
  │    └── Gym[]
  │         ├── Trainer[]       (optional User 1:1 — trainer may not have login)
  │         ├── Receptionist[]  (required User 1:1 — only exists to log in)
- │         ├── Student[]
+ │         ├── Student[]           (StudentDiscount[] — descuentos asignados)
  │         ├── Group[]
  │         │    ├── TrainerGroup[]  (junction, includes hourlyRate)
  │         │    │    └── TrainerGroupSchedule[]
@@ -104,6 +106,7 @@ User (auth)
  │         │    └── Attendance[]
  │         ├── Payment[]  ── CashClosing[]
  │         ├── StudentFile[]
+ │         ├── Discount[]         (StudentDiscount[] los asigna a alumnos, con vigencia)
  │         └── FixedExpense[]
  ├── Trainer 1:1  (optional)
  └── Receptionist 1:1  (optional)
@@ -121,8 +124,24 @@ User (auth)
 `/[gymId]`, con la nav recortada a Alumnos / Asistencias / Cuotas (`RECEPTIONIST_SECTIONS` en
 `components/layout/NavLinks.tsx`). Puede hacer CRUD de alumnos (incluidas fichas y apto médico),
 inscribirlos en grupos, generar las cuotas del mes y registrar pagos, y cargar asistencias.
-Quedan fuera: cierres de caja, gastos, métricas, grupos y entrenadores. `active: false` corta el
+Quedan fuera: cierres de caja, gastos, métricas, grupos, entrenadores y descuentos. `active: false` corta el
 acceso sin borrar el registro; `DELETE` borra el `User` y arrastra al `Receptionist` por cascade.
+
+### Descuentos → cuotas
+
+`Discount` es del gimnasio y lo configura solo el owner. `StudentDiscount` lo ata a un alumno con
+vigencia en períodos mensuales (`validFrom` / `validUntil`, el primer día del mes como `Payment.period`;
+`validUntil` null = sin corte). El servicio rechaza vigencias solapadas para un mismo alumno, así que
+en cada período hay **a lo sumo un descuento aplicable**.
+
+El descuento se aplica **al generar/sincronizar las cuotas** (`generateMonthlyPayments`), no al
+marcarlas pagadas: `baseAmount` es la suma de los grupos, `discountAmount` lo que se descuenta y
+`amount` lo que se cobra. Como `amount` sigue siendo el monto final, métricas y cierres de caja no
+cambiaron. Las cuotas `PAID` nunca se recalculan — quedan congeladas con `discountName` como
+snapshot, que sobrevive incluso al borrado del descuento.
+
+El cálculo vive aislado en `modules/discounts/discounts.calc.ts` (funciones puras, sin DB) para
+poder testearlo sin montar un escenario entero.
 
 ### Enums (in schema.prisma)
 - `UserRole`: `ADMIN | OWNER | TRAINER | RECEPTIONIST`
@@ -132,6 +151,7 @@ acceso sin borrar el registro; `DELETE` borra el `User` y arrastra al `Reception
 - `PaymentMethod`: `CASH | TRANSFER | CARD`
 - `StudentFileType`: `FICHA | APTO_MEDICO`
 - `DayOfWeek`: `MONDAY | TUESDAY | WEDNESDAY | THURSDAY | FRIDAY | SATURDAY | SUNDAY`
+- `DiscountType`: `PERCENTAGE | FIXED_AMOUNT | FIXED_PRICE`
 
 ### Route groups
 - `app/(auth)/` — public routes (`/login`)
@@ -153,6 +173,7 @@ Lo que sí se mockea: `@/lib/auth` (la sesión), `@/lib/logger` y los servicios 
 | `tests/role-routing.test.ts` | Ruteo por rol del proxy + invariante de que ningún redirect encadena otro |
 | `tests/guards.test.ts` | `requireGymRole` y su fallback por rol |
 | `tests/receptionists.service.test.ts` | Alta transaccional, email duplicado, hash de contraseña, borrado por cascade |
+| `tests/discounts.calc.test.ts` | El cálculo del descuento: los tres tipos, los topes (nunca negativo, nunca recargo), vigencias y solapamientos |
 
 Al agregar un endpoint que acepte más de un rol, sumalo al catálogo de `api-access.test.ts`: las
 listas `RECEPTIONIST_ALLOWED` / `RECEPTIONIST_DENIED` son la definición ejecutable de los permisos.
@@ -201,6 +222,11 @@ modules/                    ← Business logic, one folder per domain
   receptionists/
   groups/
   schedules/
+  discounts/
+    discounts.calc.ts       ← Cálculo puro del descuento (sin DB) — testeado en tests/discounts.calc.test.ts
+    discounts.errors.ts     ← Errores de dominio → status HTTP
+    discounts.service.ts
+    discounts.schema.ts
 
 app/api/                    ← HTTP layer only (thin controllers)
   auth/[...nextauth]/       ← NextAuth internals, do not touch

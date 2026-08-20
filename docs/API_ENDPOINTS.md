@@ -18,6 +18,8 @@
 - [Schedules](#schedules)
 - [Expenses](#expenses)
 - [Payments](#payments)
+- [Discounts (descuentos)](#discounts-descuentos)
+- [Student Discounts (asignaciones)](#student-discounts-asignaciones)
 - [Cash Closings (cierres de caja)](#cash-closings-cierres-de-caja)
 - [Metrics](#metrics)
 
@@ -768,7 +770,7 @@ Cada entrada de `schedules`:
 | `gymId`  | string (CUID) | Si |
 | `period` | string | Si (formato `YYYY-MM`) |
 
-**Logica:** Crea un registro `Payment` por cada alumno activo inscrito en al menos un grupo. El monto se calcula como la suma de `monthlyPrice` de cada grupo al que pertenece.
+**Logica:** Crea un registro `Payment` por cada alumno activo inscrito en al menos un grupo. `baseAmount` es la suma de `monthlyPrice` de cada grupo al que pertenece; si el alumno tiene un descuento vigente para ese periodo, se calcula `discountAmount` y `amount` queda en `baseAmount - discountAmount`. Tambien resincroniza las cuotas `PENDING`/`EXPIRED` cuando cambio la inscripcion a grupos o el descuento. Las cuotas `PAID` no se tocan: conservan el descuento con el que se cobraron.
 
 **Retorna:** `Payment[]` (201 Created)
 
@@ -813,6 +815,157 @@ Cada entrada de `schedules`:
 **Retorna:** 204 No Content.
 
 **Donde se usa:** `PaymentsView.tsx` — eliminar pago y regenerar.
+
+---
+
+## Discounts (descuentos)
+
+Los descuentos los configura el dueño y se aplican solos sobre la cuota de los alumnos que los tengan asignados. Hay tres tipos:
+
+| Tipo | `value` significa | Efecto sobre una cuota de $30.000 |
+|------|-------------------|-----------------------------------|
+| `PERCENTAGE`   | porcentaje (0-100) a descontar | `20` → paga $24.000 |
+| `FIXED_AMOUNT` | monto a descontar              | `5000` → paga $25.000 |
+| `FIXED_PRICE`  | precio final de la cuota       | `18000` → paga $18.000 |
+
+El descuento nunca deja la cuota por debajo de cero ni genera recargo.
+
+### `GET /api/discounts?gymId=xxx`
+
+**Para que sirve:** Listar los descuentos del gimnasio, con la cantidad de alumnos que tiene cada uno asignado.
+
+**Roles:** `OWNER`
+
+**Recibe (query params):** `gymId` (requerido).
+
+**Retorna:** `Discount[]` con `_count.students`.
+
+**Donde se usa:** `DiscountsView.tsx` — tabla de descuentos. `StudentsView.tsx` — combo del modal de asignacion (filtra los activos).
+
+---
+
+### `POST /api/discounts`
+
+**Para que sirve:** Crear un descuento.
+
+**Roles:** `OWNER`
+
+**Recibe (body JSON):**
+| Campo         | Tipo   | Requerido |
+|---------------|--------|-----------|
+| `gymId`       | string | Si        |
+| `name`        | string | Si (unico dentro del gimnasio, max 60) |
+| `type`        | enum   | Si (`PERCENTAGE`, `FIXED_AMOUNT`, `FIXED_PRICE`) |
+| `value`       | number | Si (> 0; si es `PERCENTAGE`, <= 100) |
+| `description` | string | No (max 200) |
+| `active`      | boolean| No (default `true`) |
+
+**Retorna:** `Discount` (201 Created). `409` si ya existe uno con ese nombre en el gimnasio.
+
+**Donde se usa:** `DiscountsView.tsx` — modal "Nuevo descuento".
+
+---
+
+### `PATCH /api/discounts/:id?gymId=xxx`
+
+**Para que sirve:** Editar un descuento o activarlo/desactivarlo.
+
+**Roles:** `OWNER`
+
+**Recibe (body JSON):** los mismos campos que `POST`, todos opcionales (sin `gymId`).
+
+**Logica:** Un descuento con `active: false` deja de aplicarse a las cuotas nuevas y no se puede asignar, pero conserva las asignaciones y el historial.
+
+**Retorna:** `Discount`. `409` si el nombre choca con otro descuento del gimnasio.
+
+**Donde se usa:** `DiscountsView.tsx` — modal de edicion y boton Activar/Desactivar.
+
+---
+
+### `DELETE /api/discounts/:id?gymId=xxx`
+
+**Para que sirve:** Eliminar un descuento.
+
+**Roles:** `OWNER`
+
+**Validaciones:** `409` si todavia esta asignado a algun alumno — borrarlo cambiaria en silencio lo que se le cobra. Para retirar uno en uso hay que desactivarlo o quitarlo de los alumnos primero.
+
+**Retorna:** `204 No Content`.
+
+**Donde se usa:** `DiscountsView.tsx` — boton Eliminar.
+
+---
+
+## Student Discounts (asignaciones)
+
+La vigencia se expresa en periodos mensuales (`YYYY-MM`), igual que `Payment.period`. Un alumno no puede tener dos descuentos vigentes en el mismo periodo: la API rechaza vigencias solapadas.
+
+### `GET /api/students/:id/discounts?gymId=xxx`
+
+**Para que sirve:** Listar los descuentos asignados a un alumno (vigentes e historicos), de mas nuevo a mas viejo.
+
+**Roles:** `OWNER`
+
+**Retorna:** `StudentDiscount[]` con el `discount` embebido.
+
+**Donde se usa:** `StudentsView.tsx` — seccion "Descuento" del panel de detalle.
+
+---
+
+### `POST /api/students/:id/discounts?gymId=xxx`
+
+**Para que sirve:** Asignar un descuento al alumno.
+
+**Roles:** `OWNER`
+
+**Recibe (body JSON):**
+| Campo        | Tipo   | Requerido |
+|--------------|--------|-----------|
+| `discountId` | string | Si (tiene que ser del mismo gimnasio) |
+| `validFrom`  | string | No (`YYYY-MM`; default: mes en curso) |
+| `validUntil` | string \| null | No (`YYYY-MM`; null = sin fecha de corte) |
+| `notes`      | string | No (max 200) |
+
+**Validaciones:**
+- `403` si el descuento es de otro gimnasio.
+- `404` si el descuento no existe.
+- `409` si el descuento esta desactivado.
+- `409` si el alumno ya tiene otro descuento vigente que se pisa con ese rango.
+- `400` si `validUntil` es anterior a `validFrom`.
+
+**Retorna:** `StudentDiscount` (201 Created).
+
+**Donde se usa:** `StudentsView.tsx` — modal "Asignar descuento".
+
+---
+
+### `PATCH /api/students/:id/discounts/:assignmentId?gymId=xxx`
+
+**Para que sirve:** Cambiar la vigencia o la nota de una asignacion.
+
+**Roles:** `OWNER`
+
+**Recibe (body JSON):** `validFrom`, `validUntil`, `notes` — todos opcionales.
+
+**Validaciones:** las mismas de solapamiento y rango invertido que el `POST`.
+
+**Retorna:** `StudentDiscount`.
+
+**Donde se usa:** Todavia no se usa en el frontend (la UI hoy quita y vuelve a asignar).
+
+---
+
+### `DELETE /api/students/:id/discounts/:assignmentId?gymId=xxx`
+
+**Para que sirve:** Quitarle el descuento al alumno.
+
+**Roles:** `OWNER`
+
+**Logica:** El alumno vuelve a pagar la cuota completa desde la proxima generacion de cuotas. Las cuotas ya cobradas no cambian.
+
+**Retorna:** `204 No Content`.
+
+**Donde se usa:** `StudentsView.tsx` — boton Quitar de la seccion "Descuento".
 
 ---
 

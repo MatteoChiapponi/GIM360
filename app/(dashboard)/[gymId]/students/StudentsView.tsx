@@ -15,6 +15,9 @@ import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
 import { FormModal } from "@/components/ui/FormModal"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
+import {
+  DISCOUNT_TYPE_LABEL, formatDiscountValue, formatMoney, previewDiscountAmount, type DiscountType,
+} from "@/lib/discounts-format"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,7 +29,10 @@ type PaymentMethod = "CASH" | "TRANSFER" | "CARD"
 type StudentPayment = {
   id: string
   period: string
+  baseAmount: string
   amount: string
+  discountAmount: string
+  discountName: string | null
   status: PaymentStatus
   paymentMethod: PaymentMethod | null
   paidAt: string | null
@@ -61,6 +67,18 @@ type EnrolledGroup = {
   group: { id: string; name: string; monthlyPrice: string; schedules: GroupSchedule[] }
 }
 
+type SimpleDiscount = {
+  id: string; name: string; type: DiscountType; value: string; active: boolean
+}
+
+type DiscountAssignment = {
+  id: string
+  validFrom: string
+  validUntil: string | null
+  notes: string | null
+  discount: SimpleDiscount
+}
+
 type StudentDetail = {
   id: string; firstName: string; lastName: string
   phone1: string; phone2: string | null; emergencyContact: string | null; emergencyPhone: string | null
@@ -89,6 +107,30 @@ function fmtDate(iso: string | null) {
   return new Date(iso).toLocaleDateString("es-AR")
 }
 
+/** ISO de un período mensual → "2026-03", el formato de <input type="month">. */
+function toYearMonth(iso: string) {
+  return iso.slice(0, 7)
+}
+
+function currentYearMonth() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+}
+
+/** "2026-03" → "marzo 2026" */
+function periodLabel(yearMonth: string) {
+  const [y, m] = yearMonth.split("-").map(Number)
+  return new Date(y, m - 1, 1).toLocaleDateString("es-AR", { month: "long", year: "numeric" })
+}
+
+/** Una asignación rige hoy si el mes en curso cae dentro de su vigencia. */
+function isCurrentlyValid(a: DiscountAssignment) {
+  const now = currentYearMonth()
+  const from = toYearMonth(a.validFrom)
+  const until = a.validUntil ? toYearMonth(a.validUntil) : null
+  return from <= now && (until === null || now <= until)
+}
+
 function fmtCurrency(value: string | number) {
   const n = typeof value === "string" ? parseFloat(value) : value
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n)
@@ -113,7 +155,10 @@ const EMPTY_FORM: NewForm = {
 }
 const EMPTY_EDIT: EditForm = { firstName: "", lastName: "", dueDay: "", phone1: "", phone2: "" }
 
-export default function StudentsView({ gymId }: { gymId: string }) {
+type AssignForm = { discountId: string; validFrom: string; validUntil: string; notes: string }
+const EMPTY_ASSIGN: AssignForm = { discountId: "", validFrom: "", validUntil: "", notes: "" }
+
+export default function StudentsView({ gymId, canManageDiscounts = false }: { gymId: string; canManageDiscounts?: boolean }) {
   const { data: students, loading, error, refetch } = useFetch<Student[]>(
     `/api/students?gymId=${gymId}`, [], "No se pudieron cargar los alumnos.",
   )
@@ -166,6 +211,17 @@ export default function StudentsView({ gymId }: { gymId: string }) {
   const [studentPayments, setStudentPayments] = useState<StudentPayment[]>([])
   const [paymentsLoading, setPaymentsLoading] = useState(false)
 
+  // Descuentos del alumno (solo owner)
+  const [assignments, setAssignments] = useState<DiscountAssignment[]>([])
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false)
+  const [gymDiscounts, setGymDiscounts] = useState<SimpleDiscount[]>([])
+  const [showAssignModal, setShowAssignModal] = useState(false)
+  const [assignForm, setAssignForm] = useState<AssignForm>(EMPTY_ASSIGN)
+  const [assignSubmitting, setAssignSubmitting] = useState(false)
+  const [assignError, setAssignError] = useState<string | null>(null)
+  const [removingAssignmentId, setRemovingAssignmentId] = useState<string | null>(null)
+  const [confirmAssignmentId, setConfirmAssignmentId] = useState<string | null>(null)
+
   // Files
   const [files, setFiles] = useState<StudentFile[]>([])
   const [filesLoading, setFilesLoading] = useState(false)
@@ -205,6 +261,8 @@ export default function StudentsView({ gymId }: { gymId: string }) {
     setFiles([])
     setFilesError(null)
     setStudentPayments([])
+    setAssignments([])
+    setAssignError(null)
     setDetailLoading(true)
     try {
       const res = await fetch(`/api/students/${s.id}?gymId=${gymId}`)
@@ -213,6 +271,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
       setDetailLoading(false)
     }
     await loadFiles(s.id)
+    if (canManageDiscounts) loadAssignments(s.id)
     setPaymentsLoading(true)
     fetch(`/api/payments?gymId=${gymId}&studentId=${s.id}`)
       .then((r) => {
@@ -231,6 +290,74 @@ export default function StudentsView({ gymId }: { gymId: string }) {
     setEditError(null)
     setFiles([])
     setFilesError(null)
+  }
+
+  async function loadAssignments(studentId: string) {
+    setAssignmentsLoading(true)
+    try {
+      const res = await fetch(`/api/students/${studentId}/discounts?gymId=${gymId}`)
+      if (res.ok) setAssignments(await res.json())
+    } catch {
+      /* la ficha sigue siendo útil sin esta sección */
+    } finally {
+      setAssignmentsLoading(false)
+    }
+  }
+
+  /** El modal pide los descuentos del gimnasio recién al abrirse: es la única
+   *  pantalla que los necesita y evita un fetch por cada ficha que se abre. */
+  async function openAssignModal() {
+    setAssignForm({ ...EMPTY_ASSIGN, validFrom: currentYearMonth() })
+    setAssignError(null)
+    setShowAssignModal(true)
+    try {
+      const res = await fetch(`/api/discounts?gymId=${gymId}`)
+      if (res.ok) {
+        const list: (SimpleDiscount & { _count: unknown })[] = await res.json()
+        setGymDiscounts(list.filter((d) => d.active))
+      } else {
+        setAssignError("No se pudieron cargar los descuentos.")
+      }
+    } catch {
+      setAssignError("No se pudieron cargar los descuentos.")
+    }
+  }
+
+  async function handleAssignDiscount(e: React.FormEvent) {
+    e.preventDefault()
+    if (!selectedDetail) return
+    if (!assignForm.discountId) { setAssignError("Elegí un descuento."); return }
+
+    setAssignError(null)
+    setAssignSubmitting(true)
+    const res = await fetch(`/api/students/${selectedDetail.id}/discounts?gymId=${gymId}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        discountId: assignForm.discountId,
+        validFrom: assignForm.validFrom || undefined,
+        validUntil: assignForm.validUntil || null,
+        notes: assignForm.notes.trim() || null,
+      }),
+    })
+    if (res.ok) {
+      setShowAssignModal(false)
+      await loadAssignments(selectedDetail.id)
+    } else {
+      const data = await res.json().catch(() => ({}))
+      setAssignError(typeof data?.error === "string" ? data.error : "No se pudo asignar el descuento.")
+    }
+    setAssignSubmitting(false)
+  }
+
+  async function handleRemoveAssignment(assignmentId: string) {
+    if (!selectedDetail) return
+    setRemovingAssignmentId(assignmentId)
+    const res = await fetch(`/api/students/${selectedDetail.id}/discounts/${assignmentId}?gymId=${gymId}`, {
+      method: "DELETE",
+    })
+    if (res.ok) await loadAssignments(selectedDetail.id)
+    else setAssignError("No se pudo quitar el descuento.")
+    setRemovingAssignmentId(null)
   }
 
   async function loadFiles(studentId: string) {
@@ -782,6 +909,75 @@ export default function StudentsView({ gymId }: { gymId: string }) {
                     )}
                   </div>
 
+                  {/* ── Descuento ────────────────────────────────────────── */}
+                  {canManageDiscounts && (
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Descuento</h3>
+                        <Button variant="link" onClick={openAssignModal}>+ Asignar</Button>
+                      </div>
+
+                      {assignError && <p className="text-sm text-red-600 mb-2">{assignError}</p>}
+
+                      {assignmentsLoading ? (
+                        <div className="h-16 animate-pulse rounded-lg bg-[#F0EFEB]" />
+                      ) : assignments.length === 0 ? (
+                        <p className="text-sm text-[#A5A49D]">Sin descuentos. Paga la cuota completa.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {assignments.map((a) => {
+                            const vigente = isCurrentlyValid(a)
+                            const base = selectedDetail.groups.reduce((sum, eg) => sum + Number(eg.group.monthlyPrice), 0)
+                            const descuento = previewDiscountAmount(base, a.discount.type, Number(a.discount.value))
+                            return (
+                              <div
+                                key={a.id}
+                                className={`rounded-lg border p-3 space-y-2 ${vigente ? "border-emerald-200 bg-emerald-50/60" : "border-[#E5E4E0] bg-[#FAFAF9]"}`}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium text-[#111110]">{a.discount.name}</p>
+                                    <p className="text-xs text-[#68685F]">
+                                      {DISCOUNT_TYPE_LABEL[a.discount.type]} · {formatDiscountValue(a.discount.type, a.discount.value)}
+                                    </p>
+                                  </div>
+                                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${vigente ? "bg-emerald-100 text-emerald-700" : "bg-[#F0EFEB] text-[#68685F]"}`}>
+                                    {vigente ? "Vigente" : "Fuera de vigencia"}
+                                  </span>
+                                </div>
+
+                                {vigente && base > 0 && (
+                                  <p className="text-xs text-[#68685F]">
+                                    Cuota <span className="line-through text-[#A5A49D]">{formatMoney(base)}</span>
+                                    {" → "}
+                                    <span className="font-mono font-semibold text-[#111110]">{formatMoney(base - descuento)}</span>
+                                  </p>
+                                )}
+
+                                <p className="text-[11px] text-[#A5A49D]">
+                                  Desde {periodLabel(toYearMonth(a.validFrom))}
+                                  {a.validUntil ? ` hasta ${periodLabel(toYearMonth(a.validUntil))}` : " · sin fecha de corte"}
+                                  {!a.discount.active ? " · descuento desactivado" : ""}
+                                </p>
+                                {a.notes && <p className="text-[11px] text-[#68685F] italic">{a.notes}</p>}
+
+                                <div className="flex justify-end border-t border-[#F0EFEB] pt-2">
+                                  <Button
+                                    variant="danger"
+                                    onClick={() => setConfirmAssignmentId(a.id)}
+                                    disabled={removingAssignmentId === a.id}
+                                  >
+                                    {removingAssignmentId === a.id ? "\u2026" : "Quitar"}
+                                  </Button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* ── Cuotas ───────────────────────────────────────────── */}
                   <div>
                     <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A5A49D] mb-3">Historial de cuotas</h3>
@@ -820,7 +1016,13 @@ export default function StudentsView({ gymId }: { gymId: string }) {
                                 </p>
                               </div>
                               <div className="text-right shrink-0">
-                                <p className="font-mono font-semibold text-[#111110]">${Number(p.amount).toLocaleString("es-AR")}</p>
+                                <p className="font-mono font-semibold text-[#111110]">{formatMoney(p.amount)}</p>
+                                {Number(p.discountAmount) > 0 && (
+                                  <p className="text-[10px] text-[#A5A49D]">
+                                    <span className="line-through">{formatMoney(p.baseAmount)}</span>
+                                    {p.discountName ? ` · ${p.discountName}` : ""}
+                                  </p>
+                                )}
                                 <p className={`text-xs font-medium ${statusColors[p.status]}`}>{statusLabels[p.status]}</p>
                               </div>
                             </div>
@@ -946,6 +1148,74 @@ export default function StudentsView({ gymId }: { gymId: string }) {
         confirmLabel="Dar de baja"
         onConfirm={() => { const id = confirmId!; setConfirmId(null); handleDeactivate(id) }}
         onCancel={() => setConfirmId(null)}
+      />
+
+      <FormModal
+        open={showAssignModal}
+        title="Asignar descuento"
+        error={assignError}
+        onSubmit={handleAssignDiscount}
+        submitting={assignSubmitting}
+        onCancel={() => { setShowAssignModal(false); setAssignError(null) }}
+        submitLabel="Asignar"
+      >
+        <div className="sm:col-span-2">
+          <FormField label="Descuento" required>
+            <Select
+              className="w-full"
+              value={assignForm.discountId}
+              onChange={(e) => setAssignForm((f) => ({ ...f, discountId: e.target.value }))}
+            >
+              <option value="">Elegí un descuento…</option>
+              {gymDiscounts.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name} — {formatDiscountValue(d.type, d.value)}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          {gymDiscounts.length === 0 && (
+            <p className="mt-2 text-xs text-[#A5A49D]">
+              No hay descuentos activos en este gimnasio. Creá uno en la sección Descuentos.
+            </p>
+          )}
+        </div>
+        <FormField label="Desde el mes" required>
+          <Input
+            type="month"
+            value={assignForm.validFrom}
+            onChange={(e) => setAssignForm((f) => ({ ...f, validFrom: e.target.value }))}
+          />
+        </FormField>
+        <FormField label="Hasta el mes">
+          <Input
+            type="month"
+            value={assignForm.validUntil}
+            onChange={(e) => setAssignForm((f) => ({ ...f, validUntil: e.target.value }))}
+          />
+        </FormField>
+        <div className="sm:col-span-2">
+          <FormField label="Nota">
+            <Input
+              value={assignForm.notes}
+              onChange={(e) => setAssignForm((f) => ({ ...f, notes: e.target.value }))}
+              placeholder="Ej: hermana de Julieta"
+            />
+          </FormField>
+          <p className="mt-2 text-xs text-[#A5A49D]">
+            Dejá &quot;Hasta el mes&quot; vacío para que el descuento no tenga fecha de corte.
+            Se aplica a las cuotas pendientes; las ya cobradas no cambian.
+          </p>
+        </div>
+      </FormModal>
+
+      <ConfirmDialog
+        open={confirmAssignmentId !== null}
+        title="Quitar descuento"
+        message="El alumno vuelve a pagar la cuota completa desde la próxima vez que se generen las cuotas. Las cuotas ya cobradas no cambian."
+        confirmLabel="Quitar"
+        onConfirm={() => { const id = confirmAssignmentId!; setConfirmAssignmentId(null); handleRemoveAssignment(id) }}
+        onCancel={() => setConfirmAssignmentId(null)}
       />
 
       <ConfirmDialog

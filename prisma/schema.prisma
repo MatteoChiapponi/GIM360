@@ -55,6 +55,16 @@ enum PaymentMethod {
   CARD
 }
 
+/// Cómo se calcula el descuento sobre el precio base de la cuota.
+/// PERCENTAGE   → value es un porcentaje (0-100) que se resta.
+/// FIXED_AMOUNT → value es un monto fijo que se resta.
+/// FIXED_PRICE  → value es el precio final de la cuota (beca / precio especial).
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FIXED_PRICE
+}
+
 // ─── Modelos ─────────────────────────────────────────────────────────────────
 
 model User {
@@ -99,6 +109,7 @@ model Gym {
   cashClosings  CashClosing[]
   studentFiles  StudentFile[]
   attendances   Attendance[]
+  discounts     Discount[]
 
   @@index([ownerId])
 }
@@ -162,9 +173,10 @@ model Student {
   dueDay               Int              @default(1)
   createdAt            DateTime         @default(now())
 
-  groups   StudentGroup[]
-  payments Payment[]
-  files    StudentFile[]
+  groups    StudentGroup[]
+  payments  Payment[]
+  files     StudentFile[]
+  discounts StudentDiscount[]
 
   @@index([gymId])
 }
@@ -247,7 +259,12 @@ model Payment {
   studentId     String
   student       Student        @relation(fields: [studentId], references: [id], onDelete: Restrict)
   period        DateTime       // first day of the month: 2026-04-01T00:00:00Z
-  amount        Decimal        @db.Decimal(10, 2)
+  baseAmount    Decimal        @db.Decimal(10, 2) // suma de los grupos, sin descuento
+  amount        Decimal        @db.Decimal(10, 2) // lo que efectivamente se cobra (baseAmount - discountAmount)
+  discountAmount Decimal       @db.Decimal(10, 2) @default(0)
+  discountId    String?
+  discount      Discount?      @relation(fields: [discountId], references: [id], onDelete: SetNull)
+  discountName  String?        // snapshot: el nombre sobrevive al borrado del descuento
   status        PaymentStatus  @default(PENDING)
   paymentMethod PaymentMethod?
   paidAt        DateTime?
@@ -260,6 +277,46 @@ model Payment {
   @@unique([studentId, period])
   @@index([gymId, period, status])
   @@index([cashClosingId])
+  @@index([discountId])
+}
+
+/// Descuento configurable por gimnasio. Se asigna a alumnos vía StudentDiscount
+/// y se aplica sobre la cuota al generarla.
+model Discount {
+  id          String       @id @default(cuid())
+  gymId       String
+  gym         Gym          @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  type        DiscountType
+  value       Decimal      @db.Decimal(10, 2)
+  active      Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+
+  students StudentDiscount[]
+  payments Payment[]
+
+  @@unique([gymId, name])
+  @@index([gymId])
+}
+
+/// Asignación de un descuento a un alumno, con vigencia por período mensual.
+/// `validFrom` / `validUntil` son el primer día del mes (igual que Payment.period);
+/// `validUntil` null = sin fecha de corte. El servicio garantiza que las vigencias
+/// de un mismo alumno no se solapen, así siempre hay a lo sumo uno aplicable.
+model StudentDiscount {
+  id         String    @id @default(cuid())
+  studentId  String
+  student    Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  discountId String
+  discount   Discount  @relation(fields: [discountId], references: [id], onDelete: Cascade)
+  validFrom  DateTime
+  validUntil DateTime?
+  notes      String?
+  createdAt  DateTime  @default(now())
+
+  @@index([studentId])
+  @@index([discountId])
 }
 
 model StudentFile {

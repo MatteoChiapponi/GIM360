@@ -19,6 +19,7 @@ export function NavLinks({ gymId, role }: { gymId: string; role?: string }) {
     { section: "receptionists", label: "Recepción",     href: `/${gymId}/receptionists` },
     { section: "attendance",    label: "Asistencias",   href: `/${gymId}/attendance` },
     { section: "payments",      label: "Cuotas",        href: `/${gymId}/payments` },
+    { section: "discounts",     label: "Descuentos",    href: `/${gymId}/discounts` },
     { section: "expenses",      label: "Gastos",        href: `/${gymId}/expenses` },
     { section: "metrics",       label: "Métricas",      href: `/${gymId}/metrics` },
   ]

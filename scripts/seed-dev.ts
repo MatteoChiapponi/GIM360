@@ -70,6 +70,7 @@ async function main() {
   await db.trainerGroup.deleteMany({ where: { trainer: { gymId: gym.id } } })
   await db.schedule.deleteMany({ where: { group: { gymId: gym.id } } })
   await db.student.deleteMany({ where: { gymId: gym.id } })
+  await db.discount.deleteMany({ where: { gymId: gym.id } })
   await db.trainer.deleteMany({ where: { gymId: gym.id } })
   await db.group.deleteMany({ where: { gymId: gym.id } })
   await db.fixedExpense.deleteMany({ where: { gymId: gym.id } })
@@ -422,6 +423,7 @@ async function main() {
           gymId: gym.id,
           studentId: student.id,
           period,
+          baseAmount: monthlyAmounts[student.id],
           amount: monthlyAmounts[student.id],
           status: entry.status,
           paidAt: entry.paidAt,
@@ -433,6 +435,67 @@ async function main() {
   }
 
   console.log(`Payments: ${paymentCount} (Ene + Feb + Mar 2026)`)
+
+  // ── Discounts ──────────────────────────────────────────────────────────────
+  //
+  // Se asignan a alumnos con la cuota de marzo sin cobrar: al entrar a Cuotas,
+  // la resincronización recalcula esas cuotas con el descuento aplicado. Las de
+  // enero y febrero, ya pagadas, quedan como se cobraron.
+
+  const [dHermanos, dBeca] = await Promise.all([
+    db.discount.create({
+      data: {
+        gymId: gym.id,
+        name: "Hermanos",
+        description: "20% para el segundo hermano en adelante",
+        type: "PERCENTAGE",
+        value: 20,
+      },
+    }),
+    db.discount.create({
+      data: {
+        gymId: gym.id,
+        name: "Beca deportiva",
+        description: "Cuota fija para becadas del equipo de competición",
+        type: "FIXED_PRICE",
+        value: 15000,
+      },
+    }),
+    db.discount.create({
+      data: {
+        gymId: gym.id,
+        name: "Pago anual anticipado",
+        description: "$5.000 de bonificación (temporada 2025, ya no se usa)",
+        type: "FIXED_AMOUNT",
+        value: 5000,
+        active: false,
+      },
+    }),
+  ])
+
+  const mateo = students.find((s) => s.firstName === "Mateo")!
+  const camila = students.find((s) => s.firstName === "Camila")!
+
+  await db.studentDiscount.createMany({
+    data: [
+      {
+        studentId: mateo.id,
+        discountId: dHermanos.id,
+        validFrom: firstOfMonth(2026, 3),
+        validUntil: null,
+        notes: "Hermano de Sofia",
+      },
+      {
+        studentId: camila.id,
+        discountId: dBeca.id,
+        validFrom: firstOfMonth(2026, 3),
+        validUntil: firstOfMonth(2026, 8),
+        notes: "Beca hasta fin de temporada",
+      },
+    ],
+  })
+
+  console.log("Discounts: Hermanos (20%), Beca deportiva ($15k fijo), Pago anual (inactivo) — 2 alumnos con descuento")
 
   console.log(`\n--- GYM360 Central listo ---\n`)
 
@@ -675,6 +738,7 @@ async function main() {
         gymId: gym2.id,
         studentId: student.id,
         period: firstOfMonth(2026, 3),
+        baseAmount: monthlyAmounts2[student.id],
         amount: monthlyAmounts2[student.id],
         status: entry.status,
         paidAt: entry.paidAt,

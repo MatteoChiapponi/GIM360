@@ -9,13 +9,17 @@ import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
 import { Button } from "@/components/ui/Button"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
+import { formatMoney } from "@/lib/discounts-format"
 
 type PaymentStatus = "PENDING" | "PAID" | "EXPIRED"
 type PaymentMethod = "CASH" | "TRANSFER" | "CARD"
 
 type Payment = {
   id: string
+  baseAmount: string
   amount: string
+  discountAmount: string
+  discountName: string | null
   status: PaymentStatus
   paidAt: string | null
   paymentMethod: PaymentMethod | null
@@ -344,6 +348,9 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
   const total = collected + uncollectedAmount
   const collectionPct = total > 0 ? Math.round((collected / total) * 100) : 0
 
+  const discounted = payments.filter((p) => Number(p.discountAmount) > 0)
+  const discountTotal = discounted.reduce((sum, p) => sum + Number(p.discountAmount), 0)
+
   const unverifiedPaid = payments.filter((p) => !p.verified && p.status === "PAID")
   const hasUnverifiedPaid = unverifiedPaid.length > 0
   const unverifiedCollected = unverifiedPaid.reduce((sum, p) => sum + Number(p.amount), 0)
@@ -598,6 +605,15 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#F0EFEB]">
             <div className="h-full rounded-full bg-emerald-500 transition-all duration-500" style={{ width: `${collectionPct}%` }} />
           </div>
+          {discountTotal > 0 && (
+            <p className="mt-3 text-xs text-[#68685F]">
+              Descuentos aplicados:{" "}
+              <span className="font-mono font-semibold text-emerald-700">{formatMoney(discountTotal)}</span>
+              <span className="text-[#A5A49D]">
+                {" "}en {discounted.length} cuota{discounted.length !== 1 ? "s" : ""}
+              </span>
+            </p>
+          )}
         </div>
       )}
 
@@ -633,9 +649,27 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
             key: "amount",
             header: "Monto",
             align: "right",
-            render: (p) => (
-              <span className="font-mono font-medium text-[#111110]">${Number(p.amount).toLocaleString("es-AR")}</span>
-            ),
+            render: (p) => {
+              const discount = Number(p.discountAmount)
+              if (discount <= 0) {
+                return <span className="font-mono font-medium text-[#111110]">{formatMoney(p.amount)}</span>
+              }
+              return (
+                <div className="flex flex-col items-end gap-0.5">
+                  <span className="font-mono font-medium text-[#111110]">{formatMoney(p.amount)}</span>
+                  <span className="text-[10px] text-[#A5A49D]">
+                    <span className="line-through">{formatMoney(p.baseAmount)}</span>
+                    {" · "}
+                    <span className="text-emerald-700">−{formatMoney(discount)}</span>
+                  </span>
+                  {p.discountName && (
+                    <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                      {p.discountName}
+                    </span>
+                  )}
+                </div>
+              )
+            },
           },
           {
             key: "status",
@@ -814,7 +848,15 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
               <p className="text-[15px] font-semibold text-[#111110]">Registrar pago</p>
               {payMethodPayment && (
                 <p className="text-sm text-[#68685F]">
-                  {payMethodPayment.student.firstName} {payMethodPayment.student.lastName} — <span className="font-mono font-semibold">${Number(payMethodPayment.amount).toLocaleString("es-AR")}</span>
+                  {payMethodPayment.student.firstName} {payMethodPayment.student.lastName} — <span className="font-mono font-semibold">{formatMoney(payMethodPayment.amount)}</span>
+                  {Number(payMethodPayment.discountAmount) > 0 && (
+                    <span className="block text-xs text-[#A5A49D]">
+                      <span className="line-through">{formatMoney(payMethodPayment.baseAmount)}</span>
+                      {" con "}
+                      <span className="text-emerald-700">{payMethodPayment.discountName ?? "descuento"}</span>
+                      {" (−"}{formatMoney(payMethodPayment.discountAmount)}{")"}
+                    </span>
+                  )}
                 </p>
               )}
               <p className="text-sm text-[#A5A49D]">Seleccioná el método de pago:</p>

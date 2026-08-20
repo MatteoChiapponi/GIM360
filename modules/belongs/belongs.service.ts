@@ -80,6 +80,18 @@ export async function expenseBelongsToGym(expenseId: string, gymId: string): Pro
   return !!expense
 }
 
+/** Verifica si el descuento pertenece al gimnasio */
+export async function discountBelongsToGym(discountId: string, gymId: string): Promise<boolean> {
+  const discount = await db.discount.findFirst({ where: { id: discountId, gymId } })
+  return !!discount
+}
+
+/** Verifica si la asignación de descuento es de ese alumno */
+export async function assignmentBelongsToStudent(assignmentId: string, studentId: string): Promise<boolean> {
+  const assignment = await db.studentDiscount.findFirst({ where: { id: assignmentId, studentId } })
+  return !!assignment
+}
+
 /** Verifica si el gimnasio está activo (status === ACTIVE) */
 export async function gymIsActive(gymId: string): Promise<boolean> {
   const gym = await db.gym.findFirst({ where: { id: gymId, status: "ACTIVE" } })

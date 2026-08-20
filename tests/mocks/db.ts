@@ -74,6 +74,8 @@ export const db = {
   cashClosing: table(),
   attendance: table(),
   studentFile: table(),
+  discount: table(),
+  studentDiscount: table(),
   $transaction: vi.fn(),
 }
 
