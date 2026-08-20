@@ -44,6 +44,11 @@ export const PATCH = withAuth([UserRole.OWNER], async (req, session) => {
   }
 
   const result = await updateLateFeeConfig(gymId, config)
-  logger.info("Late fee config updated", { gymId, enabled: config.enabled, frequency: config.frequency })
+  logger.info("Late fee config updated", {
+    gymId,
+    enabled: config.enabled,
+    repeatEveryDays: config.repeatEveryDays,
+    maxCharges: config.maxCharges,
+  })
   return NextResponse.json(result)
 })

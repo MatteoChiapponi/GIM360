@@ -1,9 +1,6 @@
 -- CreateEnum
 CREATE TYPE "LateFeeType" AS ENUM ('FIXED', 'PERCENT');
 
--- CreateEnum
-CREATE TYPE "LateFeeFrequency" AS ENUM ('ONCE', 'DAILY', 'WEEKLY', 'MONTHLY');
-
 -- AlterTable
 ALTER TABLE "Payment" ADD COLUMN     "lateFee" DECIMAL(10,2),
 ADD COLUMN     "lateDays" INTEGER,
@@ -20,7 +17,8 @@ CREATE TABLE "LateFeeConfig" (
     "graceDays" INTEGER NOT NULL DEFAULT 0,
     "feeType" "LateFeeType" NOT NULL DEFAULT 'PERCENT',
     "feeValue" DECIMAL(10,2) NOT NULL DEFAULT 0,
-    "frequency" "LateFeeFrequency" NOT NULL DEFAULT 'ONCE',
+    "repeatEveryDays" INTEGER,
+    "maxCharges" INTEGER,
     "maxFeeAmount" DECIMAL(10,2),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,

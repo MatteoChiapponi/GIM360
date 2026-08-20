@@ -1,20 +1,18 @@
 import { db } from "@/lib/db"
-import type { LateFeeType, LateFeeFrequency } from "@/app/generated/prisma/client"
+import type { LateFeeType } from "@/app/generated/prisma/client"
 import {
   DEFAULT_LATE_FEE_CONFIG,
   computeLateFee,
   lateDaysAt,
   type LateFeeConfig,
-  type LateFeeFrequencyValue,
   type LateFeeTypeValue,
 } from "@/lib/late-fee"
 import type { UpdateLateFeeConfigInput } from "./late-fees.schema"
 
 // `lib/late-fee` no puede importar el cliente de Prisma (lo consumen componentes
-// "use client"), así que declara los mismos valores a mano. Si algún día los
-// enums se separan, estos alias dejan de compilar.
+// "use client"), así que declara los mismos valores a mano. Si algún día el enum
+// se separa, este alias deja de compilar.
 type _SameFeeTypes = LateFeeTypeValue extends LateFeeType ? (LateFeeType extends LateFeeTypeValue ? true : never) : never
-type _SameFrequencies = LateFeeFrequencyValue extends LateFeeFrequency ? (LateFeeFrequency extends LateFeeFrequencyValue ? true : never) : never
 
 /**
  * Regla de mora del gimnasio. Sin fila configurada devuelve el default, que es
@@ -29,7 +27,8 @@ export async function getLateFeeConfig(gymId: string): Promise<LateFeeConfig> {
     graceDays: row.graceDays,
     feeType: row.feeType,
     feeValue: Number(row.feeValue),
-    frequency: row.frequency,
+    repeatEveryDays: row.repeatEveryDays,
+    maxCharges: row.maxCharges,
     maxFeeAmount: row.maxFeeAmount === null ? null : Number(row.maxFeeAmount),
   }
 }

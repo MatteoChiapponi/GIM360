@@ -838,7 +838,7 @@ Al despagar (o al limpiar el medio), `amount` vuelve a la cuota limpia y el rest
 
 **Recibe (query params):** `gymId` (requerido).
 
-**Retorna:** `{ enabled, graceDays, feeType, feeValue, frequency, maxFeeAmount }`. Un gimnasio que
+**Retorna:** `{ enabled, graceDays, feeType, feeValue, repeatEveryDays, maxCharges, maxFeeAmount }`. Un gimnasio que
 nunca la configuro devuelve el default: la regla apagada.
 
 **Donde se usa:** `LateFeeSettings.tsx` — formulario de configuracion. `PaymentsView.tsx` —
@@ -860,12 +860,14 @@ vista previa del recargo antes de cobrar.
 | `graceDays`    | number  | Si (entero, 0 a 365) |
 | `feeType`      | enum    | Si (`FIXED`, `PERCENT`) |
 | `feeValue`     | number  | Si (pesos si `FIXED`, % si `PERCENT`) |
-| `frequency`    | enum    | Si (`ONCE`, `DAILY`, `WEEKLY`, `MONTHLY`) |
-| `maxFeeAmount` | number \| null | Si (tope del recargo acumulado; `null` = sin tope) |
+| `repeatEveryDays` | number \| null | Si (cada cuantos dias se repite; `null` = una sola vez) |
+| `maxCharges`   | number \| null | Si (tope de veces que se cobra; `null` = sin tope) |
+| `maxFeeAmount` | number \| null | Si (tope del recargo acumulado en pesos; `null` = sin tope) |
 
 **Validaciones:**
 - Con `enabled = true`, `feeValue` tiene que ser mayor a 0.
 - Con `feeType = PERCENT`, `feeValue` no puede superar 100.
+- `maxCharges` solo se acepta si el recargo se repite (`repeatEveryDays` no nulo).
 - El gimnasio tiene que estar activo.
 
 **Retorna:** la regla guardada.

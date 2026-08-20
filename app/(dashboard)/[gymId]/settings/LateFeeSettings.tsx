@@ -9,12 +9,10 @@ import { Skeleton } from "@/components/ui/Skeleton"
 import { formatMoney } from "@/lib/payment-methods"
 import {
   DEFAULT_LATE_FEE_CONFIG,
-  LATE_FEE_FREQUENCY_LABEL,
   computeLateFee,
   daysLabel,
   lateFeeCharges,
   type LateFeeConfig,
-  type LateFeeFrequencyValue,
   type LateFeeTypeValue,
 } from "@/lib/late-fee"
 
@@ -27,16 +25,20 @@ const TYPE_OPTIONS: { value: LateFeeTypeValue; label: string }[] = [
   { value: "FIXED", label: "Monto fijo" },
 ]
 
-const FREQUENCIES: LateFeeFrequencyValue[] = ["ONCE", "DAILY", "WEEKLY", "MONTHLY"]
-
 /** Formulario: los números se editan como texto para permitir el campo vacío. */
 type Draft = {
   enabled: boolean
   graceDays: string
   feeType: LateFeeTypeValue
   feeValue: string
-  frequency: LateFeeFrequencyValue
-  capped: boolean
+  /** El recargo vuelve a aplicarse mientras la cuota siga impaga */
+  repeats: boolean
+  repeatEveryDays: string
+  /** Tope de aplicaciones (solo tiene sentido si se repite) */
+  cappedCharges: boolean
+  maxCharges: string
+  /** Tope del recargo acumulado, en pesos */
+  cappedAmount: boolean
   maxFeeAmount: string
 }
 
@@ -45,26 +47,35 @@ const toDraft = (c: LateFeeConfig): Draft => ({
   graceDays: String(c.graceDays),
   feeType: c.feeType,
   feeValue: String(c.feeValue),
-  frequency: c.frequency,
-  capped: c.maxFeeAmount !== null,
+  repeats: c.repeatEveryDays !== null,
+  repeatEveryDays: c.repeatEveryDays === null ? "" : String(c.repeatEveryDays),
+  cappedCharges: c.maxCharges !== null,
+  maxCharges: c.maxCharges === null ? "" : String(c.maxCharges),
+  cappedAmount: c.maxFeeAmount !== null,
   maxFeeAmount: c.maxFeeAmount === null ? "" : String(c.maxFeeAmount),
 })
 
-const toConfig = (d: Draft): LateFeeConfig => ({
-  enabled: d.enabled,
-  graceDays: Number(d.graceDays) || 0,
-  feeType: d.feeType,
-  feeValue: Number(d.feeValue) || 0,
-  frequency: d.frequency,
-  maxFeeAmount: d.capped && d.maxFeeAmount !== "" ? Number(d.maxFeeAmount) : null,
-})
+const toConfig = (d: Draft): LateFeeConfig => {
+  const repeatEveryDays = d.repeats && d.repeatEveryDays !== "" ? Number(d.repeatEveryDays) : null
+  return {
+    enabled: d.enabled,
+    graceDays: Number(d.graceDays) || 0,
+    feeType: d.feeType,
+    feeValue: Number(d.feeValue) || 0,
+    repeatEveryDays,
+    // Sin repetición el recargo se cobra una sola vez: el tope de veces no aplica.
+    maxCharges: repeatEveryDays !== null && d.cappedCharges && d.maxCharges !== "" ? Number(d.maxCharges) : null,
+    maxFeeAmount: d.cappedAmount && d.maxFeeAmount !== "" ? Number(d.maxFeeAmount) : null,
+  }
+}
 
 const sameConfig = (a: LateFeeConfig, b: LateFeeConfig) =>
   a.enabled === b.enabled &&
   a.graceDays === b.graceDays &&
   a.feeType === b.feeType &&
   a.feeValue === b.feeValue &&
-  a.frequency === b.frequency &&
+  a.repeatEveryDays === b.repeatEveryDays &&
+  a.maxCharges === b.maxCharges &&
   a.maxFeeAmount === b.maxFeeAmount
 
 /** Sección de configuración: el recargo que acumula una cuota impaga. */
@@ -121,8 +132,16 @@ export function LateFeeSettings({ gymId }: { gymId: string }) {
         setSaveError("El porcentaje no puede superar el 100%.")
         return
       }
-      if (draft.capped && !(Number(draft.maxFeeAmount) > 0)) {
-        setSaveError("El tope tiene que ser mayor a 0, o destildá el límite.")
+      if (draft.repeats && !(Number(draft.repeatEveryDays) >= 1)) {
+        setSaveError("Ingresá cada cuántos días se repite el recargo, o destildá la repetición.")
+        return
+      }
+      if (draft.repeats && draft.cappedCharges && !(Number(draft.maxCharges) >= 1)) {
+        setSaveError("El máximo de veces tiene que ser 1 o más, o destildá ese límite.")
+        return
+      }
+      if (draft.cappedAmount && !(Number(draft.maxFeeAmount) > 0)) {
+        setSaveError("El tope en pesos tiene que ser mayor a 0, o destildá ese límite.")
         return
       }
     }
@@ -225,21 +244,68 @@ export function LateFeeSettings({ gymId }: { gymId: string }) {
 
               <div className="space-y-1.5">
                 <p className="text-sm font-medium text-[#111110]">Cada cuánto se aplica</p>
-                <Select
-                  value={draft.frequency}
-                  onChange={(e) => update({ frequency: e.target.value as LateFeeFrequencyValue })}
-                  aria-label="Frecuencia del recargo"
-                  className="w-full"
-                >
-                  {FREQUENCIES.map((f) => (
-                    <option key={f} value={f}>{LATE_FEE_FREQUENCY_LABEL[f]}</option>
-                  ))}
-                </Select>
-                <p className="text-xs text-[#A5A49D]">
-                  {draft.frequency === "ONCE"
-                    ? "Un único recargo, sin importar cuánto se demore."
-                    : "El recargo se suma otra vez por cada período que siga impaga."}
-                </p>
+                <label className="flex items-center gap-2 text-sm text-[#68685F] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={draft.repeats}
+                    onChange={(e) =>
+                      update({
+                        repeats: e.target.checked,
+                        repeatEveryDays: e.target.checked ? draft.repeatEveryDays : "",
+                        // El tope de veces solo existe si el recargo se repite
+                        cappedCharges: e.target.checked ? draft.cappedCharges : false,
+                        maxCharges: e.target.checked ? draft.maxCharges : "",
+                      })
+                    }
+                    className="h-4 w-4 rounded border-[#E5E4E0] accent-[#111110]"
+                  />
+                  Repetirlo mientras siga impaga
+                </label>
+                {draft.repeats ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm text-[#68685F]">cada</span>
+                    <NumberInput
+                      integer
+                      value={draft.repeatEveryDays}
+                      onChange={(e) => update({ repeatEveryDays: e.target.value })}
+                      placeholder="Ej: 7"
+                      aria-label="Cada cuántos días se repite el recargo"
+                      className="w-20"
+                    />
+                    <span className="text-sm text-[#68685F]">días</span>
+                  </div>
+                ) : (
+                  <p className="text-xs text-[#A5A49D]">
+                    Un único recargo, sin importar cuánto se demore en pagar.
+                  </p>
+                )}
+                {draft.repeats && (
+                  <>
+                    <label className="flex items-center gap-2 pt-1 text-sm text-[#68685F] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={draft.cappedCharges}
+                        onChange={(e) => update({ cappedCharges: e.target.checked, maxCharges: e.target.checked ? draft.maxCharges : "" })}
+                        className="h-4 w-4 rounded border-[#E5E4E0] accent-[#111110]"
+                      />
+                      Limitar cuántas veces se cobra
+                    </label>
+                    {draft.cappedCharges && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm text-[#68685F]">máximo</span>
+                        <NumberInput
+                          integer
+                          value={draft.maxCharges}
+                          onChange={(e) => update({ maxCharges: e.target.value })}
+                          placeholder="Ej: 4"
+                          aria-label="Máximo de veces que se cobra el recargo"
+                          className="w-20"
+                        />
+                        <span className="text-sm text-[#68685F]">veces</span>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -260,17 +326,17 @@ export function LateFeeSettings({ gymId }: { gymId: string }) {
               </div>
 
               <div className="space-y-1.5">
-                <p className="text-sm font-medium text-[#111110]">Tope del recargo</p>
+                <p className="text-sm font-medium text-[#111110]">Tope en pesos</p>
                 <label className="flex items-center gap-2 text-sm text-[#68685F] cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={draft.capped}
-                    onChange={(e) => update({ capped: e.target.checked, maxFeeAmount: e.target.checked ? draft.maxFeeAmount : "" })}
+                    checked={draft.cappedAmount}
+                    onChange={(e) => update({ cappedAmount: e.target.checked, maxFeeAmount: e.target.checked ? draft.maxFeeAmount : "" })}
                     className="h-4 w-4 rounded border-[#E5E4E0] accent-[#111110]"
                   />
                   Limitar cuánto puede acumular
                 </label>
-                {draft.capped && (
+                {draft.cappedAmount && (
                   <div className="flex items-center gap-1.5">
                     <span className="text-sm text-[#68685F]">$</span>
                     <NumberInput

@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { LateFeeType, LateFeeFrequency } from "@/app/generated/prisma/client"
+import { LateFeeType } from "@/app/generated/prisma/client"
 
 export const updateLateFeeConfigSchema = z
   .object({
@@ -9,7 +9,11 @@ export const updateLateFeeConfigSchema = z
     graceDays: z.number().int().min(0).max(365),
     feeType: z.nativeEnum(LateFeeType),
     feeValue: z.number().min(0).multipleOf(0.01),
-    frequency: z.nativeEnum(LateFeeFrequency),
+    /** Cada cuántos días se repite mientras siga impaga. `null` = una sola vez. */
+    repeatEveryDays: z.number().int().min(1).max(365).nullable(),
+    /** Tope de aplicaciones. `null` = sin tope. */
+    maxCharges: z.number().int().min(1).max(365).nullable(),
+    /** Tope del recargo acumulado, en pesos. `null` = sin tope. */
     maxFeeAmount: z.number().positive().multipleOf(0.01).nullable(),
   })
   .refine((c) => !c.enabled || c.feeValue > 0, {
@@ -19,6 +23,10 @@ export const updateLateFeeConfigSchema = z
   .refine((c) => c.feeType !== LateFeeType.PERCENT || c.feeValue <= 100, {
     message: "El porcentaje no puede superar el 100%",
     path: ["feeValue"],
+  })
+  .refine((c) => c.repeatEveryDays !== null || c.maxCharges === null, {
+    message: "Un recargo por única vez no lleva tope de aplicaciones",
+    path: ["maxCharges"],
   })
 
 export type UpdateLateFeeConfigInput = z.infer<typeof updateLateFeeConfigSchema>

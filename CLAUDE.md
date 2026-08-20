@@ -134,7 +134,6 @@ acceso sin borrar el registro; `DELETE` borra el `User` y arrastra al `Reception
 - `PaymentMethod`: `CASH | TRANSFER | CARD`
 - `PaymentAdjustmentType`: `NONE | SURCHARGE | DISCOUNT` — ajuste que cada gimnasio le configura a un medio de pago
 - `LateFeeType`: `FIXED | PERCENT` — si el recargo por mora es un monto en pesos o un % de la cuota
-- `LateFeeFrequency`: `ONCE | DAILY | WEEKLY | MONTHLY` — cada cuánto se vuelve a aplicar mientras siga impaga
 - `StudentFileType`: `FICHA | APTO_MEDICO`
 - `DayOfWeek`: `MONDAY | TUESDAY | WEDNESDAY | THURSDAY | FRIDAY | SATURDAY | SUNDAY`
 
@@ -192,8 +191,12 @@ venían funcionando todos. Cuatro parámetros la definen:
 |---|---|
 | `graceDays` | Días de tolerancia después del vencimiento antes de que empiece a correr |
 | `feeType` + `feeValue` | Cuánto: un monto fijo (`FIXED`) o un % de la cuota (`PERCENT`) |
-| `frequency` | Si se aplica una sola vez (`ONCE`) o se acumula por día / semana / mes de atraso |
+| `repeatEveryDays` | Cada cuántos días se vuelve a aplicar mientras siga impaga. `null` = una sola vez |
+| `maxCharges` | Tope opcional de veces que puede cobrarse (solo con repetición) |
 | `maxFeeAmount` | Tope opcional del recargo acumulado, en pesos |
+
+Los dos topes son independientes y se pueden combinar: corta el que llegue primero. La cuenta de
+aplicaciones es por bloque empezado — con `repeatEveryDays: 7`, ocho días de atraso ya son dos.
 
 - **Configuración**: `/[gymId]/settings`, solo owner. `GET /api/late-fee` lo leen owner y
   recepcionista (necesita previsualizar lo que va a cobrar); `PATCH` es del owner.

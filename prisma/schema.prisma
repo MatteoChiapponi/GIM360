@@ -67,15 +67,6 @@ enum LateFeeType {
   PERCENT
 }
 
-/// Cada cuánto vuelve a aplicarse el recargo mientras la cuota siga impaga.
-/// ONCE = una sola vez al pasar el plazo; el resto acumula por período de atraso.
-enum LateFeeFrequency {
-  ONCE
-  DAILY
-  WEEKLY
-  MONTHLY
-}
-
 // ─── Modelos ─────────────────────────────────────────────────────────────────
 
 model User {
@@ -316,21 +307,24 @@ model PaymentMethodConfig {
 }
 
 /// Regla de mora del gimnasio: pasados `graceDays` del vencimiento, la cuota
-/// impaga acumula un recargo de `feeValue` ($ o %) por cada período de atraso
-/// que marque `frequency`, con un tope opcional en `maxFeeAmount`.
+/// impaga suma un recargo de `feeValue` ($ o %), que se repite cada
+/// `repeatEveryDays` mientras siga impaga (null = una sola vez).
+/// Dos topes opcionales e independientes: `maxCharges` limita cuántas veces
+/// puede cobrarse y `maxFeeAmount` cuánto puede acumular en pesos.
 /// La ausencia de fila equivale al default: regla apagada.
 model LateFeeConfig {
-  id           String           @id @default(cuid())
-  gymId        String           @unique
-  gym          Gym              @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  enabled      Boolean          @default(false)
-  graceDays    Int              @default(0)
-  feeType      LateFeeType      @default(PERCENT)
-  feeValue     Decimal          @default(0) @db.Decimal(10, 2)
-  frequency    LateFeeFrequency @default(ONCE)
-  maxFeeAmount Decimal?         @db.Decimal(10, 2)
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+  id              String      @id @default(cuid())
+  gymId           String      @unique
+  gym             Gym         @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  enabled         Boolean     @default(false)
+  graceDays       Int         @default(0)
+  feeType         LateFeeType @default(PERCENT)
+  feeValue        Decimal     @default(0) @db.Decimal(10, 2)
+  repeatEveryDays Int?
+  maxCharges      Int?
+  maxFeeAmount    Decimal?    @db.Decimal(10, 2)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 }
 
 model StudentFile {

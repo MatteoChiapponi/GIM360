@@ -128,12 +128,13 @@ async function main() {
       graceDays: 5,
       feeType: "PERCENT",
       feeValue: 5,
-      frequency: "WEEKLY",
+      repeatEveryDays: 7,
+      maxCharges: 4,
       maxFeeAmount: 6000,
     },
   })
 
-  console.log("Mora: 5% por semana de atraso a partir del día 5, tope $6.000")
+  console.log("Mora: 5% cada 7 días a partir del día 5, máximo 4 veces y tope $6.000")
 
   // ── Groups ─────────────────────────────────────────────────────────────────
 

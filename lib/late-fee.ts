@@ -6,14 +6,11 @@
  * fórmula está una sola vez: el servicio delega en estas funciones, así que lo
  * que la pantalla previsualiza es exactamente lo que después cobra el backend.
  *
- * Los valores duplican los enums `LateFeeType` y `LateFeeFrequency` de Prisma;
- * el servicio tiene un chequeo de tipos que deja de compilar si se separan.
+ * Los valores de `LateFeeTypeValue` duplican el enum `LateFeeType` de Prisma; el
+ * servicio tiene un chequeo de tipos que deja de compilar si los dos se separan.
  */
 
-import { formatMoney } from "./payment-methods"
-
 export type LateFeeTypeValue = "FIXED" | "PERCENT"
-export type LateFeeFrequencyValue = "ONCE" | "DAILY" | "WEEKLY" | "MONTHLY"
 
 export type LateFeeConfig = {
   /** Con la regla apagada el recargo siempre es 0, cualquiera sea el atraso. */
@@ -23,7 +20,13 @@ export type LateFeeConfig = {
   feeType: LateFeeTypeValue
   /** Pesos si `feeType` es FIXED, porcentaje de la cuota si es PERCENT. */
   feeValue: number
-  frequency: LateFeeFrequencyValue
+  /**
+   * Cada cuántos días se vuelve a aplicar mientras la cuota siga impaga.
+   * `null` = una sola vez, no importa cuánto se demore.
+   */
+  repeatEveryDays: number | null
+  /** Tope de veces que puede aplicarse. `null` = sin tope. */
+  maxCharges: number | null
   /** Tope del recargo acumulado, en pesos. `null` = sin tope. */
   maxFeeAmount: number | null
 }
@@ -34,22 +37,9 @@ export const DEFAULT_LATE_FEE_CONFIG: LateFeeConfig = {
   graceDays: 0,
   feeType: "PERCENT",
   feeValue: 0,
-  frequency: "ONCE",
+  repeatEveryDays: null,
+  maxCharges: null,
   maxFeeAmount: null,
-}
-
-export const LATE_FEE_FREQUENCY_LABEL: Record<LateFeeFrequencyValue, string> = {
-  ONCE: "Una sola vez",
-  DAILY: "Por cada día de atraso",
-  WEEKLY: "Por cada semana de atraso",
-  MONTHLY: "Por cada mes de atraso",
-}
-
-/** Días que cubre cada aplicación del recargo. `ONCE` no acumula. */
-const FREQUENCY_DAYS: Record<Exclude<LateFeeFrequencyValue, "ONCE">, number> = {
-  DAILY: 1,
-  WEEKLY: 7,
-  MONTHLY: 30,
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100
@@ -85,15 +75,23 @@ export function lateDaysAt(period: string | Date, dueDay: number, at: Date = new
 }
 
 /**
- * Cuántas veces se aplicó el recargo con ese atraso. 0 mientras la mora esté
- * dentro de la tolerancia; después, 1 para `ONCE` y un múltiplo para el resto
- * (una semana y un día de atraso ya son dos aplicaciones semanales).
+ * Cuántas veces se aplicó el recargo con ese atraso.
+ *
+ * 0 mientras la mora esté dentro de la tolerancia. Después, 1 si la regla no se
+ * repite; si se repite, una aplicación por cada bloque de `repeatEveryDays`
+ * empezado (con repetición cada 7 días, una semana y un día ya son dos).
+ * `maxCharges` corta la cuenta.
  */
-export function lateFeeCharges(lateDays: number, config: Pick<LateFeeConfig, "graceDays" | "frequency">): number {
+export function lateFeeCharges(
+  lateDays: number,
+  config: Pick<LateFeeConfig, "graceDays" | "repeatEveryDays" | "maxCharges">,
+): number {
   const effective = lateDays - config.graceDays
   if (effective <= 0) return 0
-  if (config.frequency === "ONCE") return 1
-  return Math.ceil(effective / FREQUENCY_DAYS[config.frequency])
+
+  const charges = config.repeatEveryDays ? Math.ceil(effective / config.repeatEveryDays) : 1
+
+  return config.maxCharges !== null ? Math.min(charges, config.maxCharges) : charges
 }
 
 /**
@@ -110,24 +108,6 @@ export function computeLateFee(baseAmount: number, lateDays: number, config: Lat
   const fee = round2(unit * charges)
 
   return config.maxFeeAmount !== null ? Math.min(fee, config.maxFeeAmount) : fee
-}
-
-/** "10% por cada semana de atraso, a partir del día 5" — resumen de la regla. */
-export function lateFeeSummary(config: LateFeeConfig): string | null {
-  if (!config.enabled || config.feeValue <= 0) return null
-
-  const monto = config.feeType === "PERCENT" ? `${config.feeValue}% de la cuota` : formatMoney(config.feeValue)
-  const cada =
-    config.frequency === "ONCE"
-      ? "por única vez"
-      : LATE_FEE_FREQUENCY_LABEL[config.frequency].toLowerCase()
-  const desde =
-    config.graceDays === 0
-      ? "desde el día siguiente al vencimiento"
-      : `a partir de ${config.graceDays} día${config.graceDays === 1 ? "" : "s"} de atraso`
-  const tope = config.maxFeeAmount !== null ? `, con un tope de ${formatMoney(config.maxFeeAmount)}` : ""
-
-  return `${monto} ${cada}, ${desde}${tope}`
 }
 
 /** "3 días" / "1 día" — para textos de atraso. */

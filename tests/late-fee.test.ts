@@ -25,6 +25,7 @@ import {
   DEFAULT_LATE_FEE_CONFIG,
   computeLateFee,
   dueDateFor,
+  lateFeeCharges,
   lateDaysAt,
   type LateFeeConfig,
 } from "@/lib/late-fee"
@@ -105,30 +106,46 @@ describe("computeLateFee", () => {
     expect(computeLateFee(10000, 6, rule)).toBe(1000)
   })
 
-  it("un recargo por única vez no crece con los días", () => {
-    const rule = config({ feeType: "PERCENT", feeValue: 10, frequency: "ONCE" })
+  it("sin repetición el recargo no crece con los días", () => {
+    const rule = config({ feeType: "PERCENT", feeValue: 10, repeatEveryDays: null })
     expect(computeLateFee(10000, 1, rule)).toBe(1000)
     expect(computeLateFee(10000, 45, rule)).toBe(1000)
   })
 
-  it("un monto fijo por día se acumula", () => {
-    const rule = config({ feeType: "FIXED", feeValue: 100, frequency: "DAILY" })
+  it("repitiendo todos los días, un monto fijo se acumula", () => {
+    const rule = config({ feeType: "FIXED", feeValue: 100, repeatEveryDays: 1 })
     expect(computeLateFee(10000, 10, rule)).toBe(1000)
   })
 
-  it("por semana, una semana y un día ya son dos recargos", () => {
-    const rule = config({ feeType: "PERCENT", feeValue: 5, frequency: "WEEKLY" })
+  it("repitiendo cada 7 días, una semana y un día ya son dos recargos", () => {
+    const rule = config({ feeType: "PERCENT", feeValue: 5, repeatEveryDays: 7 })
     expect(computeLateFee(10000, 7, rule)).toBe(500)
     expect(computeLateFee(10000, 8, rule)).toBe(1000)
   })
 
-  it("el tope corta la acumulación", () => {
-    const rule = config({ feeType: "FIXED", feeValue: 100, frequency: "DAILY", maxFeeAmount: 300 })
+  it("el tope en pesos corta la acumulación", () => {
+    const rule = config({ feeType: "FIXED", feeValue: 100, repeatEveryDays: 1, maxFeeAmount: 300 })
     expect(computeLateFee(10000, 10, rule)).toBe(300)
   })
 
-  it("la tolerancia se descuenta antes de contar los períodos", () => {
-    const rule = config({ feeType: "FIXED", feeValue: 100, frequency: "DAILY", graceDays: 5 })
+  it("el tope de veces corta la acumulación", () => {
+    const rule = config({ feeType: "FIXED", feeValue: 100, repeatEveryDays: 1, maxCharges: 3 })
+    expect(computeLateFee(10000, 10, rule)).toBe(300)
+    expect(lateFeeCharges(10, rule)).toBe(3)
+  })
+
+  it("los dos topes conviven: gana el que corte antes", () => {
+    const rule = config({ feeType: "FIXED", feeValue: 100, repeatEveryDays: 1, maxCharges: 8, maxFeeAmount: 500 })
+    expect(computeLateFee(10000, 20, rule)).toBe(500)
+  })
+
+  it("un tope de veces sin repetición no cambia nada", () => {
+    const rule = config({ feeType: "FIXED", feeValue: 100, repeatEveryDays: null, maxCharges: 5 })
+    expect(computeLateFee(10000, 90, rule)).toBe(100)
+  })
+
+  it("la tolerancia se descuenta antes de contar las repeticiones", () => {
+    const rule = config({ feeType: "FIXED", feeValue: 100, repeatEveryDays: 1, graceDays: 5 })
     expect(computeLateFee(10000, 10, rule)).toBe(500)
   })
 
@@ -142,7 +159,7 @@ describe("computeLateFee", () => {
 
 describe("Al cobrar una cuota vencida se aplica la regla de mora", () => {
   it("suma el recargo y guarda la descomposición del monto", async () => {
-    seedRule({ enabled: true, feeType: "PERCENT", feeValue: 5, frequency: "ONCE" })
+    seedRule({ enabled: true, feeType: "PERCENT", feeValue: 5 })
 
     const res = await markPaid("CASH")
 
@@ -154,7 +171,7 @@ describe("Al cobrar una cuota vencida se aplica la regla de mora", () => {
   })
 
   it("la mora entra antes que el ajuste del medio: el medio ajusta lo que se cobra", async () => {
-    seedRule({ enabled: true, feeType: "PERCENT", feeValue: 10, frequency: "ONCE" })
+    seedRule({ enabled: true, feeType: "PERCENT", feeValue: 10 })
     seed("paymentMethodConfig", [
       { id: "cfg1", gymId: IDS.gym1, method: "CARD", enabled: true, adjustmentType: "SURCHARGE", adjustmentPercent: 10 },
     ])
@@ -233,7 +250,7 @@ describe("Al cobrar una cuota vencida se aplica la regla de mora", () => {
 
   it("corregir el medio de un pago viejo no le suma atraso nuevo", async () => {
     // Se cobró el mismo día del vencimiento; hoy es mucho después.
-    seedRule({ enabled: true, feeType: "FIXED", feeValue: 500, frequency: "DAILY" })
+    seedRule({ enabled: true, feeType: "FIXED", feeValue: 500, repeatEveryDays: 1 })
     seed("payment", [paymentRow({
       status: "PAID", amount: "10000", baseAmount: "10000", methodAdjustment: "0",
       lateFee: "0", lateDays: 0, paymentMethod: "CASH", paidAt: new Date(2026, 7, 10, 18, 0, 0),
@@ -317,7 +334,8 @@ describe("Configuración de la mora", () => {
     graceDays: 5,
     feeType: "PERCENT",
     feeValue: 10,
-    frequency: "WEEKLY",
+    repeatEveryDays: 7,
+    maxCharges: 4,
     maxFeeAmount: null,
   }
 
@@ -340,6 +358,19 @@ describe("Configuración de la mora", () => {
 
   it("una tolerancia negativa no pasa la validación", async () => {
     expect((await patchRule({ ...VALID, graceDays: -1 })).status).toBe(400)
+  })
+
+  it("una repetición de menos de un día no pasa la validación", async () => {
+    expect((await patchRule({ ...VALID, repeatEveryDays: 0 })).status).toBe(400)
+  })
+
+  it("un tope de veces sobre un recargo que no se repite no pasa la validación", async () => {
+    expect((await patchRule({ ...VALID, repeatEveryDays: null, maxCharges: 3 })).status).toBe(400)
+  })
+
+  it("un recargo por única vez se guarda sin repetición ni tope de veces", async () => {
+    const res = await patchRule({ ...VALID, repeatEveryDays: null, maxCharges: null })
+    expect(res.status).toBe(200)
   })
 
   it("apagar la regla no exige monto", async () => {
