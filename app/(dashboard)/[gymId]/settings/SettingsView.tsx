@@ -62,8 +62,8 @@ export default function SettingsView({ gymId }: { gymId: string }) {
     setSaved(false)
   }, [configs])
 
-  const dirty = drafts.some((d, i) => {
-    const original = configs[i]
+  const dirty = drafts.some((d) => {
+    const original = configs.find((c) => c.method === d.method)
     if (!original) return false
     return (
       d.enabled !== original.enabled ||

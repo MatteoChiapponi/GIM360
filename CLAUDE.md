@@ -151,6 +151,24 @@ ajuste — así que un gimnasio nuevo funciona sin inicializar nada.
   cobrado, que es el que suman cierres de caja y métricas. Cobrar con un medio deshabilitado da 400.
   Al despagar, `amount` vuelve a `baseAmount` y el ajuste se limpia.
 
+**Dónde impacta que `amount` ahora traiga el ajuste** — `amount` sigue siendo "la plata que entró",
+así que casi todo lo aguas abajo ya era correcto:
+
+| Lugar | Efecto |
+|---|---|
+| `cash-closings.service.ts` | El desglose por medio suma el monto cobrado. Correcto sin cambios. |
+| `gym-metrics` | `totalCollectedRevenue` (PAID) incluye el ajuste; `totalPendingRevenue` (PENDING/EXPIRED) es la cuota sin ajustar. EBITDA queda bien: un recargo es ingreso real y un descuento es ingreso resignado. |
+| `groups-metrics` / `health-metrics` | Reparten `amount` entre los grupos del alumno a prorrata del `monthlyPrice`. Se mantiene así para que `Σ cobrado por grupo == cobrado del gimnasio`; si se repartiera `baseAmount`, el ajuste desaparecería de la vista por grupo. |
+| `MetricsView` (detalle de grupo) | Con recargo, lo cobrado puede superar a `projectedRevenue`: el pendiente se piso en 0 en vez de mostrarse negativo. |
+| `generateMonthlyPayments` | Solo re-sincroniza montos de PENDING/EXPIRED, que nunca tienen ajuste. Los PAID no se tocan. |
+| Recordatorio de WhatsApp | Avisa el monto de la cuota sin ajustar, que es lo correcto: el ajuste depende de con qué termine pagando. |
+
+**Si algún día se agregan medios de pago propios del gimnasio**, la config ya es por gimnasio y la
+UI se arma con lo que devuelve la API (nunca con una lista fija), así que el cambio queda acotado a:
+`PaymentMethod` (enum → tabla con `id` y `label`), las columnas fijas de `CashClosing`
+(`cashTotal`/`transferTotal`/`cardTotal` → tabla hija por medio, mapeadas hoy en `closingBreakdown`
+de `PaymentsView`), y `PAYMENT_METHOD_LABEL` / `PaymentMethodIcon`, que pasarían a salir de la config.
+
 ### Route groups
 - `app/(auth)/` — public routes (`/login`)
 - `app/(dashboard)/` — protected routes. Entradas por rol: `/dashboard` (owner), `/admin`,

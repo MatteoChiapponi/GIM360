@@ -55,6 +55,19 @@ const STATUS_LABEL: Record<PaymentStatus, string> = { PAID: "Pagado", PENDING: "
 const STATUS_DOT: Record<PaymentStatus, string> = { PAID: "bg-emerald-500", PENDING: "bg-amber-400", EXPIRED: "bg-red-500" }
 const STATUS_TEXT: Record<PaymentStatus, string> = { PAID: "text-emerald-700", PENDING: "text-amber-700", EXPIRED: "text-red-700" }
 
+/**
+ * Desglose del cierre por medio de pago. `CashClosing` guarda un par de columnas
+ * fijas por medio, así que este mapeo es el único lugar a tocar si algún día se
+ * suman medios nuevos.
+ */
+function closingBreakdown(report: ClosingReport): { method: PaymentMethod; count: number; total: string }[] {
+  return [
+    { method: "CASH", count: report.cashCount, total: report.cashTotal },
+    { method: "TRANSFER", count: report.transferCount, total: report.transferTotal },
+    { method: "CARD", count: report.cardCount, total: report.cardTotal },
+  ]
+}
+
 /** Ajuste ya aplicado a un pago cobrado, para mostrarlo junto al método. */
 function paidAdjustment(p: Payment): number {
   return p.methodAdjustment ? Number(p.methodAdjustment) : 0
@@ -398,9 +411,12 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
         )}
       </p>
       <div className="rounded-lg border border-[#E5E4E0] bg-[#FAFAF9] p-3 space-y-2">
-        {PAYMENT_METHOD_VALUES.map((method) => {
+        {/* El desglose sale de los pagos del cierre, no de los medios habilitados:
+            un medio deshabilitado hoy puede tener cobros viejos acá adentro. */}
+        {PAYMENT_METHOD_VALUES.filter((method) =>
+          includedInClosing.some((p) => p.paymentMethod === method),
+        ).map((method) => {
           const included = includedInClosing.filter((p) => p.paymentMethod === method)
-          if (included.length === 0) return null
           const total = included.reduce((s, p) => s + Number(p.amount), 0)
           return (
             <div key={method} className="flex items-center justify-between text-sm">
@@ -582,15 +598,13 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
             </span>
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-emerald-600">
-            {closingReport.cashCount > 0 && (
-              <span>Efectivo: <span className="font-mono font-semibold">${Number(closingReport.cashTotal).toLocaleString("es-AR")}</span> ({closingReport.cashCount})</span>
-            )}
-            {closingReport.transferCount > 0 && (
-              <span>Transferencia: <span className="font-mono font-semibold">${Number(closingReport.transferTotal).toLocaleString("es-AR")}</span> ({closingReport.transferCount})</span>
-            )}
-            {closingReport.cardCount > 0 && (
-              <span>Tarjeta: <span className="font-mono font-semibold">${Number(closingReport.cardTotal).toLocaleString("es-AR")}</span> ({closingReport.cardCount})</span>
-            )}
+            {closingBreakdown(closingReport)
+              .filter((b) => b.count > 0)
+              .map((b) => (
+                <span key={b.method}>
+                  {METHOD_LABEL[b.method]}: <span className="font-mono font-semibold">{formatMoney(Number(b.total))}</span> ({b.count})
+                </span>
+              ))}
           </div>
         </div>
       )}
