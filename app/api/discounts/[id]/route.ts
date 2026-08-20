@@ -4,7 +4,6 @@ import { withAuthParams } from "@/lib/with-auth"
 import { gymBelongsToOwner, discountBelongsToGym } from "@/modules/belongs/belongs.service"
 import { getDiscountById, updateDiscount, deleteDiscount } from "@/modules/discounts/discounts.service"
 import { updateDiscountSchema } from "@/modules/discounts/discounts.schema"
-import { discountError } from "@/modules/discounts/discounts.errors"
 import { logger } from "@/lib/logger"
 
 type Params = { id: string }
@@ -67,17 +66,9 @@ export const DELETE = withAuthParams<Params>([UserRole.OWNER], async (req, sessi
   const denied = await authorize(req.nextUrl.searchParams.get("gymId"), id, session.user.id)
   if (denied) return denied
 
-  try {
-    await deleteDiscount(id)
-    logger.info("Discount deleted", { id })
-    return new NextResponse(null, { status: 204 })
-  } catch (err) {
-    const mapped = discountError(err)
-    if (mapped) {
-      logger.warn("Discount deletion rejected", { id, reason: String(err) })
-      return NextResponse.json({ error: mapped.error }, { status: mapped.status })
-    }
-    logger.error("Discount deletion failed", { error: String(err), id })
-    throw err
-  }
+  // Se lleva puestas las asignaciones a alumnos y devuelve al precio de lista
+  // las cuotas que todavía no se cobraron.
+  await deleteDiscount(id)
+  logger.info("Discount deleted", { id })
+  return new NextResponse(null, { status: 204 })
 })

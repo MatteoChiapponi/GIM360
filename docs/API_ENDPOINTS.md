@@ -884,11 +884,17 @@ El descuento nunca deja la cuota por debajo de cero ni genera recargo.
 
 ### `DELETE /api/discounts/:id?gymId=xxx`
 
-**Para que sirve:** Eliminar un descuento.
+**Para que sirve:** Eliminar un descuento y desasignarlo de todos los alumnos que lo tenian.
 
 **Roles:** `OWNER`
 
-**Validaciones:** `409` si todavia esta asignado a algun alumno — borrarlo cambiaria en silencio lo que se le cobra. Para retirar uno en uso hay que desactivarlo o quitarlo de los alumnos primero.
+**Logica:** Corre en una transaccion:
+1. Las cuotas sin cobrar (`PENDING` / `EXPIRED`) que tenian ese descuento vuelven al precio de lista en el acto — `amount` pasa a `baseAmount` y se limpian `discountAmount`, `discountId` y `discountName`.
+2. Se borra el descuento; las asignaciones (`StudentDiscount`) se van por cascade.
+
+Las cuotas ya cobradas no se tocan: quedan con el monto con el que se cobraron y conservan `discountName` como snapshot (`discountId` pasa a null por la FK).
+
+Si la idea es dejar de usarlo pero conservar las asignaciones y el historial, la alternativa es `PATCH` con `active: false`.
 
 **Retorna:** `204 No Content`.
 
@@ -961,7 +967,7 @@ La vigencia se expresa en periodos mensuales (`YYYY-MM`), igual que `Payment.per
 
 **Roles:** `OWNER`
 
-**Logica:** El alumno vuelve a pagar la cuota completa desde la proxima generacion de cuotas. Las cuotas ya cobradas no cambian.
+**Logica:** Igual que al borrar el descuento entero, pero acotado a este alumno y a los periodos que cubria la vigencia de esta asignacion: esas cuotas sin cobrar vuelven al precio de lista. Las de otros periodos y las ya cobradas no se tocan.
 
 **Retorna:** `204 No Content`.
 

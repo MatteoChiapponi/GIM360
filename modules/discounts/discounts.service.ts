@@ -38,15 +38,58 @@ export async function updateDiscount(id: string, data: UpdateDiscountInput) {
 }
 
 /**
- * Borra un descuento. Falla si todavía está asignado a algún alumno: borrarlo
- * cambiaría en silencio lo que se le cobra. Para retirar uno en uso está
- * `active: false`, que lo deja fuera de las cuotas nuevas sin tocar el historial.
+ * Borra un descuento y lo desasigna de todos los alumnos que lo tenían.
+ *
+ * Las asignaciones se van solas por cascade. Lo que hay que hacer a mano son las
+ * cuotas: las que todavía no se cobraron vuelven al precio de lista en el acto,
+ * sin esperar a la próxima sincronización, para que nadie cobre un descuento que
+ * ya no existe. Las cuotas pagadas quedan como se cobraron — `discountId` pasa a
+ * null por la FK, pero `discountName` sobrevive como testimonio de la operación.
  */
 export async function deleteDiscount(id: string) {
-  const assigned = await db.studentDiscount.count({ where: { discountId: id } })
-  if (assigned > 0) throw new Error("DISCOUNT_IN_USE")
+  return db.$transaction(async (tx) => {
+    await revertUnpaidPayments(tx, { discountId: id })
+    return tx.discount.delete({ where: { id } })
+  })
+}
 
-  return db.discount.delete({ where: { id } })
+/** El subconjunto de Prisma que usa `revertUnpaidPayments`, para poder pasarle
+ *  tanto el cliente como el `tx` de una transacción. */
+type PaymentWriter = {
+  payment: {
+    findMany: (args: { where: Record<string, unknown> }) => Promise<{ id: string; baseAmount: unknown }[]>
+    update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>
+  }
+}
+
+/**
+ * Devuelve al precio de lista las cuotas sin cobrar que tenían este descuento.
+ * `amount` vuelve a `baseAmount` fila por fila — un `updateMany` no puede copiar
+ * el valor de otra columna.
+ */
+async function revertUnpaidPayments(
+  tx: PaymentWriter,
+  where: { discountId: string; studentId?: string; period?: { gte: Date; lte?: Date } },
+) {
+  const affected = await tx.payment.findMany({
+    where: { ...where, status: { in: ["PENDING", "EXPIRED"] } },
+  })
+
+  await Promise.all(
+    affected.map((payment) =>
+      tx.payment.update({
+        where: { id: payment.id },
+        data: {
+          amount: payment.baseAmount,
+          discountAmount: 0,
+          discountId: null,
+          discountName: null,
+        },
+      }),
+    ),
+  )
+
+  return affected.length
 }
 
 // ─── Asignaciones a alumnos ──────────────────────────────────────────────────
@@ -135,6 +178,26 @@ export async function updateStudentDiscount(id: string, data: UpdateAssignmentIn
   })
 }
 
+/**
+ * Le quita el descuento al alumno. Igual que al borrar el descuento entero, las
+ * cuotas sin cobrar de los períodos que cubría vuelven al precio de lista; las
+ * de otros períodos y las ya pagadas no se tocan.
+ */
 export async function removeStudentDiscount(id: string) {
-  return db.studentDiscount.delete({ where: { id } })
+  const assignment = await db.studentDiscount.findFirst({ where: { id } })
+  if (!assignment) throw new Error("ASSIGNMENT_NOT_FOUND")
+
+  return db.$transaction(async (tx) => {
+    await revertUnpaidPayments(tx, {
+      discountId: assignment.discountId,
+      studentId: assignment.studentId,
+      // Acotado a la vigencia: el mismo descuento puede estar asignado al alumno
+      // en otro tramo del año, y ese no se toca.
+      period: {
+        gte: assignment.validFrom,
+        ...(assignment.validUntil ? { lte: assignment.validUntil } : {}),
+      },
+    })
+    return tx.studentDiscount.delete({ where: { id } })
+  })
 }

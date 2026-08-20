@@ -67,6 +67,10 @@ export default function DiscountsView({ gymId }: { gymId: string }) {
   const activos = discounts.filter((d) => d.active).length
   const asignados = discounts.reduce((sum, d) => sum + d._count.students, 0)
 
+  const confirmStudents = confirmId
+    ? discounts.find((d) => d.id === confirmId)?._count.students ?? 0
+    : 0
+
   const displayed = discounts
     .filter((d) => d.name.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => {
@@ -325,7 +329,22 @@ export default function DiscountsView({ gymId }: { gymId: string }) {
       <ConfirmDialog
         open={confirmId !== null}
         title="Eliminar descuento"
-        message="Se eliminará de forma permanente. Las cuotas ya cobradas conservan el descuento que se les aplicó. Si querés dejar de usarlo sin borrarlo, desactivalo."
+        message={
+          <div className="space-y-2">
+            <p>Se elimina de forma permanente y se les quita a los alumnos que lo tengan asignado.</p>
+            {confirmStudents > 0 && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                {confirmStudents === 1
+                  ? "1 alumno vuelve a pagar la cuota completa."
+                  : `${confirmStudents} alumnos vuelven a pagar la cuota completa.`}
+              </p>
+            )}
+            <p className="text-sm text-[#68685F]">
+              Las cuotas pendientes se recalculan sin el descuento. Las ya cobradas quedan como se cobraron.
+              Si querés dejar de usarlo sin borrarlo, desactivalo.
+            </p>
+          </div>
+        }
         confirmLabel="Eliminar"
         onConfirm={() => { const id = confirmId!; setConfirmId(null); handleDelete(id) }}
         onCancel={() => setConfirmId(null)}

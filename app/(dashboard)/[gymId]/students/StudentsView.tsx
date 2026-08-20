@@ -1212,7 +1212,7 @@ export default function StudentsView({ gymId, canManageDiscounts = false }: { gy
       <ConfirmDialog
         open={confirmAssignmentId !== null}
         title="Quitar descuento"
-        message="El alumno vuelve a pagar la cuota completa desde la próxima vez que se generen las cuotas. Las cuotas ya cobradas no cambian."
+        message="El alumno vuelve a pagar la cuota completa: las cuotas pendientes de los meses que cubría se recalculan sin el descuento. Las ya cobradas no cambian."
         confirmLabel="Quitar"
         onConfirm={() => { const id = confirmAssignmentId!; setConfirmAssignmentId(null); handleRemoveAssignment(id) }}
         onCancel={() => setConfirmAssignmentId(null)}

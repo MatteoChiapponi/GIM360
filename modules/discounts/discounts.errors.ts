@@ -9,7 +9,6 @@ const DISCOUNT_ERRORS: Record<string, { status: number; error: string }> = {
   DISCOUNT_INACTIVE:    { status: 409, error: "El descuento está desactivado" },
   OVERLAPPING_DISCOUNT: { status: 409, error: "El alumno ya tiene un descuento vigente en ese período" },
   INVALID_RANGE:        { status: 400, error: "El período final no puede ser anterior al inicial" },
-  DISCOUNT_IN_USE:      { status: 409, error: "El descuento está asignado a alumnos. Quitáselo primero o desactivalo." },
 }
 
 /** Devuelve la respuesta que corresponde, o null si el error no es de dominio

@@ -60,7 +60,17 @@ export const DELETE = withAuthParams<Params>([UserRole.OWNER], async (req, sessi
   const denied = await authorize(req.nextUrl.searchParams.get("gymId"), id, assignmentId, session.user.id)
   if (denied) return denied
 
-  await removeStudentDiscount(assignmentId)
-  logger.info("Student discount removed", { id: assignmentId, studentId: id })
-  return new NextResponse(null, { status: 204 })
+  try {
+    await removeStudentDiscount(assignmentId)
+    logger.info("Student discount removed", { id: assignmentId, studentId: id })
+    return new NextResponse(null, { status: 204 })
+  } catch (err) {
+    const mapped = discountError(err)
+    if (mapped) {
+      logger.warn("Student discount removal rejected", { id: assignmentId, reason: String(err) })
+      return NextResponse.json({ error: mapped.error }, { status: mapped.status })
+    }
+    logger.error("Student discount removal failed", { error: String(err), id: assignmentId })
+    throw err
+  }
 })
