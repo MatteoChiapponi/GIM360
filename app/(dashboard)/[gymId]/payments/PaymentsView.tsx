@@ -9,17 +9,14 @@ import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
 import { Button } from "@/components/ui/Button"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
-import { PaymentMethodIcon } from "@/components/ui/PaymentMethodIcon"
 import {
   PAYMENT_METHOD_VALUES,
   PAYMENT_METHOD_LABEL as METHOD_LABEL,
-  adjustedAmount,
-  adjustmentLabel,
   defaultPaymentMethodConfig,
   type PaymentMethodConfig,
   type PaymentMethodValue as PaymentMethod,
 } from "@/lib/payment-methods"
-import { formatMoney, round2, signedMoney } from "@/lib/money"
+import { formatMoney, signedMoney } from "@/lib/money"
 import {
   DEFAULT_LATE_FEE_CONFIG,
   computeLateFee,
@@ -29,31 +26,9 @@ import {
   type LateFeeConfig,
 } from "@/lib/late-fee"
 import { currentPeriod, formatDate, formatMonthYear, toPeriod } from "@/lib/timezone"
+import { PayPaymentModal } from "./PayPaymentModal"
 
-type PaymentStatus = "PENDING" | "PAID" | "EXPIRED"
-
-type Payment = {
-  id: string
-  amount: string
-  status: PaymentStatus
-  paidAt: string | null
-  paymentMethod: PaymentMethod | null
-  /** Monto de la cuota antes del ajuste del medio de pago (null si todavía no se cobró) */
-  baseAmount: string | null
-  /** Ajuste aplicado por el medio de pago, firmado (+ recargo / − descuento) */
-  methodAdjustment: string | null
-  /** Recargo por mora congelado al cobrar (null mientras la cuota siga impaga) */
-  lateFee: string | null
-  lateDays: number | null
-  /** El recargo se condonó a mano para esta cuota */
-  lateFeeWaived: boolean
-  /** Diferencia que puso a mano quien cobró, firmada (+ de más / − de menos) */
-  manualAdjustment: string | null
-  manualAdjustmentReason: string | null
-  verified: boolean
-  cashClosingId: string | null
-  student: { id: string; firstName: string; lastName: string; dueDay: number; phone1: string; lateFeeExempt: boolean }
-}
+import type { Payment, PaymentStatus } from "./types"
 
 type ClosingReport = {
   totalCollected: string
@@ -69,9 +44,6 @@ type ClosingReport = {
   fromDate: string
   toDate: string
 }
-
-/** Redondeos que ofrece el modal de cobro, en pesos. */
-const ROUNDING_STEPS = [100, 1000] as const
 
 const STATUS_LABEL: Record<PaymentStatus, string> = { PAID: "Pagado", PENDING: "Pendiente", EXPIRED: "Vencido" }
 const STATUS_DOT: Record<PaymentStatus, string> = { PAID: "bg-emerald-500", PENDING: "bg-amber-400", EXPIRED: "bg-red-500" }
@@ -169,22 +141,15 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
   const [sortKey, setSortKey] = useState<SortKey>("status")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
 
-  // Payment method modal state
+  // Cuota que se está cobrando. Todo lo que se decide en el modal (medio, mora y
+  // monto) vive adentro del modal, que se monta de cero por cada cobro.
   const [payMethodForId, setPayMethodForId] = useState<string | null>(null)
   const payMethodPayment = payMethodForId ? payments.find((p) => p.id === payMethodForId) : null
-  // Condonar el recargo por mora de esta cuota puntual, al momento de cobrarla
-  const [waiveLateFee, setWaiveLateFee] = useState(false)
-  // Medio elegido y monto que se va a cobrar. El monto arranca en lo que dan las
-  // reglas del gimnasio y se puede pisar a mano: es el redondeo del mostrador.
-  const [payMethod, setPayMethod] = useState<PaymentMethod | null>(null)
-  const [chargedInput, setChargedInput] = useState("")
-  const [adjustReason, setAdjustReason] = useState("")
 
   // Config de medios de pago del gimnasio (habilitados + recargo/descuento)
   const [methodConfigs, setMethodConfigs] = useState<PaymentMethodConfig[]>(
     PAYMENT_METHOD_VALUES.map(defaultPaymentMethodConfig),
   )
-  const enabledMethods = methodConfigs.filter((c) => c.enabled)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -227,55 +192,6 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
   // En el modal se muestra el recargo aunque esté condonado, para que el tilde de
   // "no cobrarlo" sea visible y se pueda volver atrás.
   const payMethodLateFee = payMethodPayment ? accruedLateFee(payMethodPayment) : 0
-
-  /** La deuda antes del medio de pago: la cuota más la mora, si se cobra. */
-  function chargeableFor(p: Payment, waived: boolean): number {
-    return round2(Number(p.amount) + (waived ? 0 : accruedLateFee(p)))
-  }
-
-  /**
-   * Lo que dan las reglas del gimnasio con ese medio: cuota + mora + el recargo o
-   * descuento del medio. Es el punto de partida del monto a cobrar, y contra esto
-   * se mide el ajuste manual — la misma cuenta que después rehace el backend.
-   */
-  function ruledTotalFor(p: Payment, method: PaymentMethod, waived: boolean): number {
-    const config = methodConfigs.find((c) => c.method === method)
-    const base = chargeableFor(p, waived)
-    return config ? adjustedAmount(base, config) : base
-  }
-
-  /** Elegir medio (o cambiar la condonación) reescribe el monto sugerido: el
-   *  redondeo que se hizo sobre otro total ya no describe este cobro. */
-  function selectPayMethod(method: PaymentMethod | null, waived = waiveLateFee) {
-    setPayMethod(method)
-    setAdjustReason("")
-    setChargedInput(method && payMethodPayment ? String(ruledTotalFor(payMethodPayment, method, waived)) : "")
-  }
-
-  function toggleWaiveLateFee(waived: boolean) {
-    setWaiveLateFee(waived)
-    if (payMethod) selectPayMethod(payMethod, waived)
-  }
-
-  /** Abre el modal de cobro reflejando la condonación que ya tenga el pago, para
-   *  que la vista previa y lo que después cobra el backend coincidan. */
-  function openPayModal(p: Payment) {
-    const waived = p.lateFeeWaived
-    const only = enabledMethods.length === 1 ? enabledMethods[0].method : null
-    setWaiveLateFee(waived)
-    setPayMethod(only)
-    setAdjustReason("")
-    setChargedInput(only ? String(ruledTotalFor(p, only, waived)) : "")
-    setPayMethodForId(p.id)
-  }
-
-  // Lo que dan las reglas, lo que se va a cobrar y la diferencia entre las dos.
-  const payMethodConfig = payMethod ? methodConfigs.find((c) => c.method === payMethod) ?? null : null
-  const payMethodDebt = payMethodPayment ? chargeableFor(payMethodPayment, waiveLateFee) : 0
-  const ruledTotal = payMethodPayment && payMethod ? ruledTotalFor(payMethodPayment, payMethod, waiveLateFee) : 0
-  const chargedAmount = chargedInput.trim() === "" ? NaN : Number(chargedInput)
-  const chargedValid = Number.isFinite(chargedAmount) && chargedAmount >= 0
-  const manualDelta = chargedValid ? round2(chargedAmount - ruledTotal) : 0
 
   // Unmark confirmation
   const [confirmUnpayId, setConfirmUnpayId] = useState<string | null>(null)
@@ -525,20 +441,6 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
 
   const unverifiedPaid = payments.filter((p) => !p.verified && p.status === "PAID")
   const hasUnverifiedPaid = unverifiedPaid.length > 0
-  const unverifiedCollected = unverifiedPaid.reduce((sum, p) => sum + Number(p.amount), 0)
-
-  // Build closing confirmation breakdown by method
-  const unverifiedByMethod = unverifiedPaid.reduce(
-    (acc, p) => {
-      const m = p.paymentMethod
-      if (m) {
-        acc[m] = { count: (acc[m]?.count ?? 0) + 1, total: (acc[m]?.total ?? 0) + Number(p.amount) }
-      }
-      return acc
-    },
-    {} as Record<PaymentMethod, { count: number; total: number }>,
-  )
-
   const includedInClosing = unverifiedPaid.filter((p) => !excludedPaymentIds.has(p.id))
   const includedCollected = includedInClosing.reduce((sum, p) => sum + Number(p.amount), 0)
   const paymentListFiltered = unverifiedPaid.filter((p) =>
@@ -954,7 +856,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
                   )}
                   <Button
                     variant="link"
-                    onClick={() => openPayModal(p)}
+                    onClick={() => setPayMethodForId(p.id)}
                     disabled={busy}
                     className="disabled:opacity-40"
                   >
@@ -1038,196 +940,21 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
         onCancel={() => setShowExclusionConfirm(false)}
       />
 
-      {/* Modal: cobrar la cuota — medio de pago y monto final */}
-      {payMethodForId !== null && payMethodPayment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" />
-          <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-[#E5E4E0] bg-white px-6 py-6 shadow-xl space-y-5">
-            <div className="space-y-1.5">
-              <p className="text-[15px] font-semibold text-[#111110]">Registrar pago</p>
-              <p className="text-sm text-[#68685F]">
-                {payMethodPayment.student.firstName} {payMethodPayment.student.lastName} — cuota de {periodLabel(period)} por{" "}
-                <span className="font-mono font-semibold">{formatMoney(Number(payMethodPayment.amount))}</span>
-              </p>
-            </div>
-
-            {/* La mora se suma a la cuota antes del ajuste del medio; el backend la
-                recalcula al guardar, así que esto es lo que se va a cobrar. */}
-            {payMethodLateFee > 0 && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-2">
-                <p className="text-sm text-amber-900">
-                  Recargo por mora:{" "}
-                  <span className="font-mono font-semibold">{formatMoney(payMethodLateFee)}</span>{" "}
-                  <span className="text-amber-700">
-                    ({daysLabel(lateDaysAt(period, payMethodPayment.student.dueDay))} de atraso)
-                  </span>
-                </p>
-                <label className="flex items-center gap-2 text-sm text-amber-900 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={waiveLateFee}
-                    onChange={(e) => toggleWaiveLateFee(e.target.checked)}
-                    className="h-4 w-4 rounded border-amber-300 accent-[#111110]"
-                  />
-                  No cobrar el recargo esta vez
-                </label>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <p className="text-sm text-[#A5A49D]">Método de pago</p>
-              <div className={`grid gap-3 ${enabledMethods.length === 1 ? "grid-cols-1" : enabledMethods.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
-                {enabledMethods.map((config) => {
-                  const total = ruledTotalFor(payMethodPayment, config.method, waiveLateFee)
-                  const badge = adjustmentLabel(config)
-                  const isDiscount = config.adjustmentType === "DISCOUNT"
-                  const selected = payMethod === config.method
-
-                  return (
-                    <button
-                      key={config.method}
-                      onClick={() => selectPayMethod(config.method)}
-                      aria-pressed={selected}
-                      className={`flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-sm font-medium transition-colors cursor-pointer ${
-                        selected
-                          ? "border-[#111110] bg-[#FAFAF9] text-[#111110]"
-                          : "border-[#E5E4E0] bg-white text-[#68685F] hover:border-[#111110] hover:text-[#111110] hover:bg-[#FAFAF9]"
-                      }`}
-                    >
-                      <PaymentMethodIcon method={config.method} />
-                      <span className="text-center leading-tight">{METHOD_LABEL[config.method]}</span>
-                      {badge && (
-                        <span className={`text-[10px] font-semibold ${isDiscount ? "text-emerald-700" : "text-amber-700"}`}>
-                          {badge}
-                        </span>
-                      )}
-                      {(badge || total !== Number(payMethodPayment.amount)) && (
-                        <span className="font-mono text-xs font-semibold text-[#111110]">{formatMoney(total)}</span>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Monto a cobrar: arranca en lo que dan las reglas y se puede pisar.
-                La diferencia queda registrada como ajuste, no se pierde. */}
-            {payMethod && (
-              <div className="rounded-xl border border-[#E5E4E0] bg-[#FAFAF9] px-4 py-3.5 space-y-3">
-                <div className="space-y-1 text-sm">
-                  <div className="flex justify-between text-[#68685F]">
-                    <span>Cuota</span>
-                    <span className="font-mono">{formatMoney(Number(payMethodPayment.amount))}</span>
-                  </div>
-                  {!waiveLateFee && payMethodLateFee > 0 && (
-                    <div className="flex justify-between text-amber-700">
-                      <span>Mora ({daysLabel(lateDaysAt(period, payMethodPayment.student.dueDay))})</span>
-                      <span className="font-mono">{signedMoney(payMethodLateFee)}</span>
-                    </div>
-                  )}
-                  {ruledTotal !== payMethodDebt && (
-                    <div className="flex justify-between text-[#68685F]">
-                      <span>
-                        {METHOD_LABEL[payMethod]}
-                        {payMethodConfig && adjustmentLabel(payMethodConfig) ? ` ${adjustmentLabel(payMethodConfig)}` : ""}
-                      </span>
-                      <span className="font-mono">{signedMoney(round2(ruledTotal - payMethodDebt))}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between border-t border-[#E5E4E0] pt-1 font-medium text-[#111110]">
-                    <span>Total según la cuota</span>
-                    <span className="font-mono">{formatMoney(ruledTotal)}</span>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label htmlFor="chargedAmount" className="block text-sm font-medium text-[#111110]">
-                    Monto a cobrar
-                  </label>
-                  <Input
-                    id="chargedAmount"
-                    type="number"
-                    min={0}
-                    step={0.01}
-                    inputMode="decimal"
-                    value={chargedInput}
-                    onChange={(e) => setChargedInput(e.target.value)}
-                    className="w-full font-mono"
-                  />
-                  <div className="flex flex-wrap items-center gap-2">
-                    {ROUNDING_STEPS.map((step) => {
-                      const rounded = Math.round(ruledTotal / step) * step
-                      if (rounded === ruledTotal || rounded <= 0) return null
-                      return (
-                        <button
-                          key={step}
-                          type="button"
-                          onClick={() => setChargedInput(String(rounded))}
-                          className="rounded-lg border border-[#E5E4E0] bg-white px-2.5 py-1 text-xs font-medium text-[#68685F] hover:border-[#111110] hover:text-[#111110] transition-colors cursor-pointer"
-                        >
-                          Redondear a {formatMoney(rounded)}
-                        </button>
-                      )
-                    })}
-                    {manualDelta !== 0 && (
-                      <button
-                        type="button"
-                        onClick={() => selectPayMethod(payMethod)}
-                        className="text-xs font-medium text-[#68685F] underline underline-offset-2 hover:text-[#111110] transition-colors cursor-pointer"
-                      >
-                        Restaurar
-                      </button>
-                    )}
-                  </div>
-                  {!chargedValid && (
-                    <p className="text-xs text-red-600">Ingresá un monto válido.</p>
-                  )}
-                </div>
-
-                {manualDelta !== 0 && (
-                  <div className="space-y-1.5 rounded-lg border border-[#E5E4E0] bg-white px-3 py-2.5">
-                    <p className="text-sm text-[#111110]">
-                      Ajuste manual:{" "}
-                      <span className={`font-mono font-semibold ${manualDelta > 0 ? "text-amber-700" : "text-emerald-700"}`}>
-                        {signedMoney(manualDelta)}
-                      </span>
-                    </p>
-                    <Input
-                      type="text"
-                      maxLength={200}
-                      placeholder="Motivo (opcional): redondeo, acuerdo…"
-                      value={adjustReason}
-                      onChange={(e) => setAdjustReason(e.target.value)}
-                      className="w-full"
-                    />
-                    <p className="text-xs text-[#A5A49D]">Queda registrado en la cuota y en el cierre de caja.</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <Button variant="secondary" onClick={() => setPayMethodForId(null)}>
-                Cancelar
-              </Button>
-              <Button
-                onClick={() =>
-                  payMethod &&
-                  handleMarkPaid(
-                    payMethodPayment.id,
-                    payMethod,
-                    waiveLateFee,
-                    manualDelta === 0 ? null : round2(chargedAmount),
-                    adjustReason,
-                  )
-                }
-                disabled={!payMethod || !chargedValid || updatingId === payMethodForId}
-              >
-                {payMethod ? `Cobrar ${formatMoney(chargedValid ? round2(chargedAmount) : ruledTotal)}` : "Elegí un método"}
-              </Button>
-            </div>
-          </div>
-        </div>
+      {payMethodPayment && (
+        <PayPaymentModal
+          // Un modal por cuota: al cambiar de cobro se monta de cero y no puede
+          // quedar el redondeo de un alumno colgado en el del siguiente.
+          key={payMethodPayment.id}
+          payment={payMethodPayment}
+          period={period}
+          methodConfigs={methodConfigs}
+          lateFee={payMethodLateFee}
+          busy={updatingId === payMethodPayment.id}
+          onCancel={() => setPayMethodForId(null)}
+          onConfirm={({ method, lateFeeWaived, chargedAmount, reason }) =>
+            handleMarkPaid(payMethodPayment.id, method, lateFeeWaived, chargedAmount, reason)
+          }
+        />
       )}
 
     </div>

@@ -43,6 +43,35 @@ function normalizeReason(reason: string | null | undefined): string | null {
 }
 
 /**
+ * El ajuste que pone quien cobra, medido contra `ruled` — lo que dieron las
+ * reglas del gimnasio. Tres casos:
+ *  - manda el monto cobrado → el ajuste es la diferencia,
+ *  - manda `null` → lo borra, y
+ *  - no lo manda → queda el que el pago ya traía (corregirle el medio a un pago
+ *    cobrado no borra el redondeo que se le hizo al alumno).
+ */
+function manualAdjustmentFor(
+  chargedAmount: number | null | undefined,
+  stored: StoredPayment["manualAdjustment"],
+  ruled: number,
+): number {
+  if (chargedAmount === undefined) return Number(stored ?? 0)
+  return chargedAmount === null ? 0 : round2(chargedAmount - ruled)
+}
+
+/**
+ * El motivo sigue al ajuste: si no quedó ajuste no hay nada que explicar, y un
+ * cobro que fija el monto a mano trae el suyo — el de un ajuste anterior no
+ * describe esta decisión. `undefined` es "no lo toques": si la edición no mueve
+ * el monto, el motivo guardado sigue siendo el bueno.
+ */
+function reasonFor(manualAdjustment: number, input: UpdatePaymentInput): string | null | undefined {
+  if (manualAdjustment === 0) return null
+  if (input.chargedAmount === undefined) return undefined
+  return normalizeReason(input.manualAdjustmentReason)
+}
+
+/**
  * Decide qué montos hay que guardar al actualizar un pago.
  *
  * Se aplican dos reglas del gimnasio y, arriba de todo, la decisión de quien
@@ -88,6 +117,10 @@ export async function resolvePaymentAmounts(
 
   const method = input.paymentMethod ?? existing.paymentMethod
 
+  // Sin medio de pago no hay cobro, y sin cobro no hay monto que ajustar: dejarlo
+  // pasar en silencio sería contestar 200 a algo que no se guardó.
+  if (!method && input.chargedAmount != null) return { ok: false, error: "not-charging" }
+
   // Solo se recalcula si el cambio afecta al cobro: editar una nota no puede
   // mover el monto de un pago viejo porque la config del gimnasio cambió después.
   const repricing =
@@ -96,10 +129,6 @@ export async function resolvePaymentAmounts(
     input.lateFeeWaived !== undefined ||
     input.chargedAmount !== undefined ||
     input.status === "PAID"
-
-  // Sin medio de pago no hay cobro, y sin cobro no hay monto que ajustar: dejarlo
-  // pasar en silencio sería contestar 200 a algo que no se guardó.
-  if (!method && input.chargedAmount != null) return { ok: false, error: "not-charging" }
 
   if (!method || !repricing) return { ok: true, fields: {} }
 
@@ -125,15 +154,7 @@ export async function resolvePaymentAmounts(
   // Lo que dan las reglas del gimnasio, antes de que nadie lo toque a mano.
   const { amount: ruled, adjustment } = applyMethodAdjustment(round2(baseAmount + lateFee), config)
 
-  // El ajuste manual: el que se decide en este cobro, o el que el pago ya traía
-  // si esta edición no lo toca (corregirle el medio no borra el redondeo que se
-  // le hizo al alumno). `chargedAmount: null` lo borra.
-  const manual =
-    input.chargedAmount !== undefined
-      ? input.chargedAmount === null
-        ? 0
-        : round2(input.chargedAmount - ruled)
-      : Number(existing.manualAdjustment ?? 0)
+  const manual = manualAdjustmentFor(input.chargedAmount, existing.manualAdjustment, ruled)
 
   // Cobrado de verdad. El piso en 0 puede recortar el ajuste, así que el que se
   // guarda se deriva del monto final: la descomposición tiene que cerrar siempre.
@@ -150,16 +171,7 @@ export async function resolvePaymentAmounts(
       lateFeeWaived: waived,
       methodAdjustment: adjustment,
       manualAdjustment,
-      // El motivo sigue al ajuste: si no quedó ajuste no hay nada que explicar, y
-      // un cobro que fija el monto a mano trae el suyo — el de un ajuste anterior
-      // no describe esta decisión. Si la edición no toca el monto, `undefined`
-      // deja intacto el motivo que ya estaba guardado.
-      manualAdjustmentReason:
-        manualAdjustment === 0
-          ? null
-          : input.chargedAmount !== undefined
-            ? normalizeReason(input.manualAdjustmentReason)
-            : undefined,
+      manualAdjustmentReason: reasonFor(manualAdjustment, input),
       paymentMethod: method,
     },
   }
