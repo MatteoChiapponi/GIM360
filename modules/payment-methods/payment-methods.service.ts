@@ -1,6 +1,13 @@
 import { db } from "@/lib/db"
 import { PaymentAdjustmentType, type PaymentMethod } from "@/app/generated/prisma/client"
+import { adjustedAmount, methodAdjustment, type AdjustmentType, type PaymentMethodValue } from "@/lib/payment-methods"
 import { PAYMENT_METHODS, type PaymentMethodConfigInput } from "./payment-methods.schema"
+
+// `lib/payment-methods` no puede importar el cliente de Prisma (lo consumen
+// componentes "use client"), así que declara los mismos valores a mano. Si algún
+// día los enums se separan, estos alias dejan de compilar.
+type _SameAdjustmentTypes = AdjustmentType extends PaymentAdjustmentType ? PaymentAdjustmentType extends AdjustmentType ? true : never : never
+type _SameMethods = PaymentMethodValue extends PaymentMethod ? PaymentMethod extends PaymentMethodValue ? true : never : never
 
 /** Config de un medio de pago tal como la consume la app (percent ya como number). */
 export type PaymentMethodConfig = {
@@ -14,8 +21,6 @@ export type PaymentMethodConfig = {
 function defaultConfig(method: PaymentMethod): PaymentMethodConfig {
   return { method, enabled: true, adjustmentType: PaymentAdjustmentType.NONE, adjustmentPercent: 0 }
 }
-
-const round2 = (n: number) => Math.round(n * 100) / 100
 
 /**
  * Filas iniciales de un gimnasio nuevo: los tres medios habilitados y sin ajuste.
@@ -94,17 +99,15 @@ export async function updatePaymentMethodConfigs(
 /**
  * Aplica el recargo o descuento del medio de pago sobre el monto de la cuota.
  * `adjustment` va firmado: positivo si es recargo, negativo si es descuento.
+ * La fórmula vive en `lib/payment-methods` para que el backend y la vista
+ * previa del cliente no puedan calcular cosas distintas.
  */
 export function applyMethodAdjustment(
   baseAmount: number,
   config: Pick<PaymentMethodConfig, "adjustmentType" | "adjustmentPercent">,
 ): { amount: number; adjustment: number } {
-  if (config.adjustmentType === PaymentAdjustmentType.NONE || config.adjustmentPercent === 0) {
-    return { amount: round2(baseAmount), adjustment: 0 }
+  return {
+    amount: adjustedAmount(baseAmount, config),
+    adjustment: methodAdjustment(baseAmount, config),
   }
-
-  const delta = round2((baseAmount * config.adjustmentPercent) / 100)
-  const adjustment = config.adjustmentType === PaymentAdjustmentType.DISCOUNT ? -delta : delta
-
-  return { amount: Math.max(round2(baseAmount + adjustment), 0), adjustment }
 }

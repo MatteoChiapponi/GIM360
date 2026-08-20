@@ -1,10 +1,14 @@
 /**
- * Espejo liviano de la config de medios de pago para el lado del cliente.
+ * Medios de pago: la parte que comparten el backend y las vistas.
  *
- * No importa el cliente de Prisma a propósito: estos tipos y helpers los usan
- * componentes "use client". El cálculo del monto real lo hace siempre el
- * backend (`applyMethodAdjustment` en modules/payment-methods) — acá solo se
- * previsualiza lo mismo con la misma fórmula.
+ * Vive en `lib/` y no importa el cliente de Prisma a propósito, porque de acá
+ * lee cualquier componente "use client" (las vistas nunca importan de
+ * `modules/`, que es server-side). La fórmula del ajuste está una sola vez:
+ * `applyMethodAdjustment` del servicio delega en estas funciones, así que el
+ * monto que previsualiza la pantalla es el mismo que después cobra el backend.
+ *
+ * Los valores duplican el enum `PaymentMethod` de Prisma; el servicio tiene un
+ * chequeo de tipos que deja de compilar si alguno de los dos se mueve.
  */
 
 export const PAYMENT_METHOD_VALUES = ["CASH", "TRANSFER", "CARD"] as const

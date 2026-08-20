@@ -57,9 +57,9 @@ export default function SettingsView({ gymId }: { gymId: string }) {
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
+    // Solo sincroniza el formulario con lo guardado. No toca `saved` ni `saveError`:
+    // guardar dispara un refetch, y limpiarlos acá se comería el aviso de éxito.
     setDrafts(configs.map(toDraft))
-    setSaveError(null)
-    setSaved(false)
   }, [configs])
 
   const dirty = drafts.some((d) => {
@@ -94,13 +94,17 @@ export default function SettingsView({ gymId }: { gymId: string }) {
       return
     }
 
+    // Mismo criterio que el schema del backend, para no mostrar un error genérico
     const invalid = drafts.find((d) => {
       if (d.adjustmentType === "NONE") return false
       const pct = Number(d.adjustmentPercent)
-      return !d.adjustmentPercent || Number.isNaN(pct) || pct <= 0 || pct > 100
+      const decimals = d.adjustmentPercent.split(".")[1]?.length ?? 0
+      return !d.adjustmentPercent || Number.isNaN(pct) || pct <= 0 || pct > 100 || decimals > 2
     })
     if (invalid) {
-      setSaveError(`El porcentaje de ${PAYMENT_METHOD_LABEL[invalid.method]} tiene que ser un número entre 0,01 y 100.`)
+      setSaveError(
+        `El porcentaje de ${PAYMENT_METHOD_LABEL[invalid.method]} tiene que ser un número entre 0,01 y 100, con hasta dos decimales.`,
+      )
       return
     }
 

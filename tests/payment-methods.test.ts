@@ -117,6 +117,48 @@ describe("Al cobrar una cuota se aplica la config del medio de pago", () => {
     expect(mockUpdatePayment).not.toHaveBeenCalled()
   })
 
+  it("editar una nota no recalcula el monto con la config de hoy", async () => {
+    // El pago se cobró con tarjeta al 10%; después el gimnasio la subió al 25%.
+    seed("payment", [{
+      id: IDS.payment1, gymId: IDS.gym1, studentId: IDS.student1, verified: false,
+      status: "PAID", amount: "11000", baseAmount: "10000", methodAdjustment: "1000", paymentMethod: "CARD",
+    }])
+    seedConfigs([{ method: "CARD", enabled: true, adjustmentType: "SURCHARGE", adjustmentPercent: 25 }])
+
+    const { PATCH } = await import("@/app/api/payments/[id]/route")
+    await PATCH(
+      makeRequest(`/api/payments/${IDS.payment1}?gymId=${IDS.gym1}`, {
+        method: "PATCH",
+        body: { notes: "Pagó en dos veces" },
+      }),
+      withParams({ id: IDS.payment1 }),
+    )
+
+    expect(mockUpdatePayment).toHaveBeenCalledWith(IDS.payment1, { notes: "Pagó en dos veces" })
+  })
+
+  it("corregir el monto de un pago cobrado reaplica el ajuste sobre la cuota nueva", async () => {
+    seed("payment", [{
+      id: IDS.payment1, gymId: IDS.gym1, studentId: IDS.student1, verified: false,
+      status: "PAID", amount: "11000", baseAmount: "10000", methodAdjustment: "1000", paymentMethod: "CARD",
+    }])
+    seedConfigs([{ method: "CARD", enabled: true, adjustmentType: "SURCHARGE", adjustmentPercent: 10 }])
+
+    const { PATCH } = await import("@/app/api/payments/[id]/route")
+    await PATCH(
+      makeRequest(`/api/payments/${IDS.payment1}?gymId=${IDS.gym1}`, {
+        method: "PATCH",
+        body: { amount: 20000 },
+      }),
+      withParams({ id: IDS.payment1 }),
+    )
+
+    expect(mockUpdatePayment).toHaveBeenCalledWith(
+      IDS.payment1,
+      expect.objectContaining({ amount: 22000, baseAmount: 20000, methodAdjustment: 2000, paymentMethod: "CARD" }),
+    )
+  })
+
   it("al despagar vuelve el monto de la cuota y se limpia el ajuste", async () => {
     seed("payment", [{
       id: IDS.payment1, gymId: IDS.gym1, studentId: IDS.student1, verified: false,

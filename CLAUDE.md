@@ -151,6 +151,11 @@ gimnasio entra por fuera del alta (un insert a mano, un restore).
   recepcionista (el recepcionista necesita saber con qué medios puede cobrar); `PATCH` es del owner.
   Siempre tiene que quedar al menos un medio habilitado — se valida sobre el resultado del merge,
   no sobre lo que manda el body.
+- **Dónde vive qué**: `modules/payment-methods/` tiene el acceso a datos y `payments.pricing.ts`
+  resuelve qué montos guardar en un update de pago (el route handler solo traduce el resultado a
+  HTTP). `lib/payment-methods.ts` es la parte client-safe — valores, etiquetas y la fórmula del
+  ajuste — que importan tanto las vistas como el servicio, para que la vista previa y el cobro no
+  puedan calcular distinto.
 - **Cobro**: el ajuste lo calcula el backend en `PATCH /api/payments/:id`, nunca el cliente. Guarda
   `baseAmount` (la cuota), `methodAdjustment` (firmado) y deja en `amount` el monto realmente
   cobrado, que es el que suman cierres de caja y métricas. Cobrar con un medio deshabilitado da 400.
