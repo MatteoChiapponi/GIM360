@@ -84,6 +84,8 @@ async function revertUnpaidPayments(
           discountAmount: 0,
           discountId: null,
           discountName: null,
+          // Sin descuento no hay nada que decidir a mano: vuelve al automático.
+          discountOverride: null,
         },
       }),
     ),

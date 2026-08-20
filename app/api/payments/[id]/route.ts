@@ -3,8 +3,9 @@ import { UserRole, PaymentMethod } from "@/app/generated/prisma/client"
 import { db } from "@/lib/db"
 import { withAuthParams } from "@/lib/with-auth"
 import { paymentBelongsToGym, gymIsActive, gymBelongsToUser, gymBelongsToOwner } from "@/modules/belongs/belongs.service"
-import { updatePayment, deletePayment } from "@/modules/payments/payments.service"
+import { updatePayment, deletePayment, setDiscountOverride } from "@/modules/payments/payments.service"
 import { updatePaymentSchema } from "@/modules/payments/payments.schema"
+import { paymentError } from "@/modules/payments/payments.errors"
 import { logger } from "@/lib/logger"
 
 type Params = { id: string }
@@ -43,6 +44,24 @@ export const PATCH = withAuthParams<Params>([UserRole.OWNER, UserRole.RECEPTIONI
   if (!parsed.success) {
     logger.warn("Validation error", { errors: parsed.error.flatten() })
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
+  }
+
+  // Aplicar o sacar el descuento a mano: el monto lo recalcula el servicio, así
+  // que va por su propio camino y no se mezcla con el resto del update.
+  if (parsed.data.discountOverride !== undefined) {
+    try {
+      const result = await setDiscountOverride(id, parsed.data.discountOverride)
+      logger.info("Payment discount override set", { id, override: parsed.data.discountOverride })
+      return NextResponse.json(result)
+    } catch (err) {
+      const mapped = paymentError(err)
+      if (mapped) {
+        logger.warn("Payment discount override rejected", { id, reason: String(err) })
+        return NextResponse.json({ error: mapped.error }, { status: mapped.status })
+      }
+      logger.error("Payment discount override failed", { error: String(err), id })
+      throw err
+    }
   }
 
   // Require paymentMethod when marking as PAID

@@ -146,6 +146,13 @@ Un descuento con `loseOnLatePayment` deja de aplicarse cuando la cuota pasa su v
 cuota deja de estar vencida. `expireOverduePayments` mueve estado y descuento en el mismo paso, así
 que la regla se aplica también en las lecturas, sin esperar a que se regeneren las cuotas.
 
+Sobre cada cuota, `Payment.discountOverride` es la última palabra: `null` = automático (manda la
+regla), `true` = aplicarlo igual, `false` = no aplicarlo. Lo setea `PATCH /api/payments/:id` con
+`discountOverride` y lo puede usar tanto el owner como el recepcionista, que es quien cobra. El monto
+lo recalcula `setDiscountOverride` desde `baseAmount` — nunca se confía en un `amount` del cliente —
+y la decisión queda guardada en la fila, así que las sincronizaciones no la pisan. Solo se puede
+sobre cuotas no cobradas: una `PAID` hay que desmarcarla primero.
+
 Borrar un descuento lo desasigna de todos los alumnos (las `StudentDiscount` caen por cascade) y,
 en la misma transacción, devuelve al precio de lista las cuotas sin cobrar que lo tenían aplicado —
 sin esperar a la próxima sincronización, para que nadie cobre un descuento que ya no existe. Quitarle
@@ -188,6 +195,7 @@ Lo que sí se mockea: `@/lib/auth` (la sesión), `@/lib/logger` y los servicios 
 | `tests/discounts.calc.test.ts` | El cálculo del descuento: los tres tipos, los topes (nunca negativo, nunca recargo), vigencias y solapamientos |
 | `tests/discounts.service.test.ts` | Qué pasa al borrar/desasignar un descuento: las cuotas sin cobrar vuelven al precio de lista, las pagadas no se tocan |
 | `tests/payments.calc.test.ts` | La fecha de vencimiento de la cuota (tope de mes, bisiestos) y de la que dependen los descuentos por mora |
+| `tests/payments.service.test.ts` | La decisión manual del descuento sobre una cuota: aplicar, sacar, volver al automático, y qué se rechaza |
 
 Al agregar un endpoint que acepte más de un rol, sumalo al catálogo de `api-access.test.ts`: las
 listas `RECEPTIONIST_ALLOWED` / `RECEPTIONIST_DENIED` son la definición ejecutable de los permisos.

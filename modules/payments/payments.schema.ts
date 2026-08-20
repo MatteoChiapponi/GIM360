@@ -12,6 +12,9 @@ export const updatePaymentSchema = z.object({
   paidAt: z.string().datetime().nullable().optional(),
   notes: z.string().nullable().optional(),
   amount: z.number().positive().multipleOf(0.01).optional(),
+  /** Decisión manual sobre el descuento: true = aplicar, false = no aplicar,
+   *  null = volver al automático. El monto lo recalcula el servidor. */
+  discountOverride: z.boolean().nullable().optional(),
 })
 
 export type GeneratePaymentsInput = z.infer<typeof generatePaymentsSchema>

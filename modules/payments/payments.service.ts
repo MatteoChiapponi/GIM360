@@ -53,20 +53,26 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
   })
 
   const assignments = await getAssignmentsForStudents(students.map((s) => s.id))
-
-  // Build map studentId → cuota esperada (precio de los grupos + descuento vigente)
-  const expected = new Map<string, ExpectedCharge>()
   const now = new Date()
-  const newRecords = students.map((student) => {
-    const charge = chargeFor(
+
+  /** Cuánto le toca pagar a este alumno, respetando la decisión manual que
+   *  tenga la cuota (`override`) por encima de la regla automática. */
+  const chargeForStudent = (student: (typeof students)[number], override: boolean | null) =>
+    chargeFor(
       student.groups.reduce((sum, sg) => sum + Number(sg.group.monthlyPrice), 0),
       assignments.filter((a) => a.studentId === student.id),
       periodDate,
       now > dueDateFor(period, student.dueDay),
+      override,
     )
-    expected.set(student.id, charge)
-    return { gymId, studentId: student.id, period: periodDate, ...charge }
-  })
+
+  const studentsById = new Map(students.map((student) => [student.id, student]))
+  const newRecords = students.map((student) => ({
+    gymId,
+    studentId: student.id,
+    period: periodDate,
+    ...chargeForStudent(student, null),
+  }))
 
   // 1. Create payments for students that don't have one yet
   if (newRecords.length > 0) {
@@ -82,11 +88,15 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
   const toDelete: string[] = []
 
   for (const payment of existingPayments) {
-    const charge = expected.get(payment.studentId)
-    if (charge === undefined) {
+    const student = studentsById.get(payment.studentId)
+    if (student === undefined) {
       // Student no longer active or has no groups → remove pending payment
       toDelete.push(payment.id)
-    } else if (isStale(payment, charge)) {
+      continue
+    }
+
+    const charge = chargeForStudent(student, payment.discountOverride)
+    if (isStale(payment, charge)) {
       // Cambió la inscripción a grupos o el descuento → actualizar montos
       updates.push(db.payment.update({ where: { id: payment.id }, data: charge }))
     }
@@ -105,13 +115,19 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
   return getPaymentsByGym(gymId, period)
 }
 
-/** Aplica al precio base el descuento vigente del alumno, si tiene alguno y si
- *  corresponde aplicarlo (los de "pago en término" no valen sobre una cuota vencida). */
+/**
+ * Aplica al precio base el descuento vigente del alumno, si tiene alguno.
+ *
+ * Quién decide: si la cuota trae una decisión manual (`override`), manda esa —
+ * el operario puede perdonar la mora o sacar el descuento a mano. Si no, manda
+ * la regla: los descuentos de "pago en término" no valen sobre una cuota vencida.
+ */
 function chargeFor(
   groupsTotal: number,
   studentAssignments: Awaited<ReturnType<typeof getAssignmentsForStudents>>,
   periodDate: Date,
   isLate: boolean,
+  override: boolean | null,
 ): ExpectedCharge {
   const baseAmount = round2(groupsTotal)
   const applicable = resolveApplicableDiscount(
@@ -126,10 +142,10 @@ function chargeFor(
     return { baseAmount, amount: baseAmount, discountAmount: 0, discountId: null, discountName: null }
   }
 
-  // El descuento perdido por mora conserva el vínculo con `discountAmount` en
+  // El descuento que no se aplica conserva el vínculo con `discountAmount` en
   // cero: así la vista puede decir cuál se perdió, y si la cuota deja de estar
   // vencida se recalcula sola contra la asignación, que sigue intacta.
-  const discountAmount = discountApplies(applicable.discount, isLate)
+  const discountAmount = (override ?? discountApplies(applicable.discount, isLate))
     ? computeDiscountAmount(baseAmount, applicable.discount)
     : 0
 
@@ -185,7 +201,7 @@ export async function expireOverduePayments(gymId: string, period: string) {
 
     if (payment.discount?.loseOnLatePayment) {
       const baseAmount = Number(payment.baseAmount)
-      const discountAmount = discountApplies(payment.discount, isLate)
+      const discountAmount = (payment.discountOverride ?? discountApplies(payment.discount, isLate))
         ? computeDiscountAmount(baseAmount, { ...payment.discount, value: Number(payment.discount.value) })
         : 0
 
@@ -226,6 +242,49 @@ export async function updatePayment(id: string, data: UpdatePaymentData) {
   return db.payment.update({
     where: { id },
     data,
+    ...paymentWithStudent,
+  })
+}
+
+/**
+ * Aplica o saca a mano el descuento de una cuota puntual.
+ *
+ * `override`: true = aplicarlo aunque la regla lo hubiera sacado (perdonarle la
+ * mora), false = no aplicarlo aunque corresponda, null = volver al automático.
+ *
+ * La decisión queda guardada en la cuota, así que sobrevive a las
+ * sincronizaciones: nadie le pisa el criterio al operario. El monto lo recalcula
+ * el servidor a partir de `baseAmount` y del descuento de la cuota — no se
+ * confía en un monto mandado desde el cliente.
+ */
+export async function setDiscountOverride(id: string, override: boolean | null) {
+  const payment = await db.payment.findFirst({
+    where: { id },
+    include: {
+      student: { select: { dueDay: true } },
+      discount: { select: { type: true, value: true, loseOnLatePayment: true } },
+    },
+  })
+
+  if (!payment) throw new Error("PAYMENT_NOT_FOUND")
+  // Una cuota cobrada ya es historia: para corregirla hay que desmarcarla primero.
+  if (payment.status === "PAID") throw new Error("PAYMENT_ALREADY_PAID")
+  if (!payment.discount) throw new Error("PAYMENT_WITHOUT_DISCOUNT")
+
+  const baseAmount = Number(payment.baseAmount)
+  const isLate = new Date() > dueDateFor(payment.period.toISOString().slice(0, 7), payment.student.dueDay)
+  const applies = override ?? discountApplies(payment.discount, isLate)
+  const discountAmount = applies
+    ? computeDiscountAmount(baseAmount, { ...payment.discount, value: Number(payment.discount.value) })
+    : 0
+
+  return db.payment.update({
+    where: { id },
+    data: {
+      discountOverride: override,
+      discountAmount,
+      amount: round2(baseAmount - discountAmount),
+    },
     ...paymentWithStudent,
   })
 }

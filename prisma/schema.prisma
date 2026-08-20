@@ -265,6 +265,9 @@ model Payment {
   discountId    String?
   discount      Discount?      @relation(fields: [discountId], references: [id], onDelete: SetNull)
   discountName  String?        // snapshot: el nombre sobrevive al borrado del descuento
+  /// Decisión manual del operario sobre el descuento de ESTA cuota:
+  /// null = automático (manda la regla), true = aplicarlo igual, false = no aplicarlo.
+  discountOverride Boolean?
   status        PaymentStatus  @default(PENDING)
   paymentMethod PaymentMethod?
   paidAt        DateTime?

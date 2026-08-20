@@ -792,6 +792,14 @@ Cada entrada de `schedules`:
 | `paidAt`        | datetime | No |
 | `notes`         | string | No |
 | `amount`        | number | No |
+| `discountOverride` | boolean \| null | No — decision manual sobre el descuento de esa cuota |
+
+**Descuento a mano:** si el body trae `discountOverride`, el endpoint no actualiza nada mas: aplica la decision y recalcula el monto en el servidor.
+- `true` — aplicar el descuento aunque la regla lo hubiera sacado (perdonarle la mora).
+- `false` — no aplicarlo aunque corresponda.
+- `null` — volver al automatico.
+
+La decision queda guardada en la cuota, asi que sobrevive a las sincronizaciones. Devuelve `409` si la cuota ya esta cobrada (hay que desmarcarla primero) o si no tiene ningun descuento asignado.
 
 **Validaciones:**
 - No se puede modificar un pago verificado (cierre de caja ya realizado).
@@ -831,6 +839,8 @@ Los descuentos los configura el dueño y se aplican solos sobre la cuota de los 
 El descuento nunca deja la cuota por debajo de cero ni genera recargo.
 
 Ademas, cualquiera de los tres puede marcarse con `loseOnLatePayment: true` ("solo por pago en termino"): mientras la cuota no venza se aplica normal, y al vencer (pasado el `dueDay` del alumno) pasa a valer el precio completo. No es definitivo — la cuota conserva el vinculo con el descuento y `discountAmount` en cero, asi que si deja de estar vencida el descuento vuelve.
+
+Esa regla es el automatico. Sobre cada cuota concreta, quien la cobra puede decidir a mano con `discountOverride` (ver `PATCH /api/payments/:id`), y esa decision le gana a la regla.
 
 ### `GET /api/discounts?gymId=xxx`
 

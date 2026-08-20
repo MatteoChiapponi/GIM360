@@ -20,6 +20,7 @@ type Payment = {
   amount: string
   discountAmount: string
   discountName: string | null
+  discountOverride: boolean | null
   status: PaymentStatus
   paidAt: string | null
   paymentMethod: PaymentMethod | null
@@ -137,6 +138,9 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
   const [payMethodForId, setPayMethodForId] = useState<string | null>(null)
   const payMethodPayment = payMethodForId ? payments.find((p) => p.id === payMethodForId) : null
 
+  // Toggle manual del descuento
+  const [togglingDiscountId, setTogglingDiscountId] = useState<string | null>(null)
+
   // Unmark confirmation
   const [confirmUnpayId, setConfirmUnpayId] = useState<string | null>(null)
 
@@ -227,6 +231,30 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
       setMutationError("Error de conexión. Intentá de nuevo.")
     } finally {
       setUpdatingId(null)
+    }
+  }
+
+  /** Aplica o saca el descuento de esa cuota puntual. El monto lo recalcula el
+   *  servidor; acá solo se refleja lo que devuelve. */
+  async function handleToggleDiscount(id: string, apply: boolean | null) {
+    setMutationError(null)
+    setTogglingDiscountId(id)
+    try {
+      const res = await fetch(`/api/payments/${id}?gymId=${gymId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ discountOverride: apply }),
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        setPayments((prev) => prev.map((p) => (p.id === id ? updated : p)))
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setMutationError(typeof data?.error === "string" ? data.error : "No se pudo cambiar el descuento.")
+      }
+    } catch {
+      setMutationError("Error de conexión. Intentá de nuevo.")
+    } finally {
+      setTogglingDiscountId(null)
     }
   }
 
@@ -652,8 +680,8 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
             render: (p) => {
               const discount = Number(p.discountAmount)
 
-              // Descuento que la cuota tenía asignado pero no se le aplicó por
-              // estar vencida: se muestra tachado, para que se entienda el monto.
+              // Descuento que la cuota tiene asignado pero no se le está
+              // aplicando: se muestra tachado, para que se entienda el monto.
               if (discount <= 0) {
                 return (
                   <div className="flex flex-col items-end gap-0.5">
@@ -661,7 +689,11 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
                     {p.discountName && (
                       <span
                         className="rounded-full bg-[#F0EFEB] px-1.5 py-0.5 text-[10px] font-medium text-[#A5A49D] line-through"
-                        title={`${ON_TIME_ONLY_LABEL}: se perdió por pagar fuera de término`}
+                        title={
+                          p.discountOverride === false
+                            ? "El descuento se sacó a mano en esta cuota"
+                            : `${ON_TIME_ONLY_LABEL}: se perdió por pagar fuera de término`
+                        }
                       >
                         {p.discountName}
                       </span>
@@ -678,8 +710,11 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
                     <span className="text-emerald-700">−{formatMoney(discount)}</span>
                   </span>
                   {p.discountName && (
-                    <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
-                      {p.discountName}
+                    <span
+                      className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700"
+                      title={p.discountOverride === true ? "Aplicado a mano en esta cuota" : undefined}
+                    >
+                      {p.discountName}{p.discountOverride === true ? " ·" : ""}
                     </span>
                   )}
                 </div>
@@ -864,23 +899,68 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
               {payMethodPayment && (
                 <p className="text-sm text-[#68685F]">
                   {payMethodPayment.student.firstName} {payMethodPayment.student.lastName} — <span className="font-mono font-semibold">{formatMoney(payMethodPayment.amount)}</span>
-                  {Number(payMethodPayment.discountAmount) === 0 && payMethodPayment.discountName && (
-                    <span className="block text-xs text-amber-700">
-                      Perdió el descuento «{payMethodPayment.discountName}» por pagar fuera de término.
-                    </span>
-                  )}
                   {Number(payMethodPayment.discountAmount) > 0 && (
-                    <span className="block text-xs text-[#A5A49D]">
-                      <span className="line-through">{formatMoney(payMethodPayment.baseAmount)}</span>
-                      {" con "}
-                      <span className="text-emerald-700">{payMethodPayment.discountName ?? "descuento"}</span>
-                      {" (−"}{formatMoney(payMethodPayment.discountAmount)}{")"}
-                    </span>
+                    <span className="ml-1 text-xs line-through text-[#A5A49D]">{formatMoney(payMethodPayment.baseAmount)}</span>
                   )}
                 </p>
               )}
               <p className="text-sm text-[#A5A49D]">Seleccioná el método de pago:</p>
             </div>
+
+            {/* Descuento de esta cuota — el operario decide si se lo aplica */}
+            {payMethodPayment?.discountName && (
+              <div className="rounded-xl border border-[#E5E4E0] bg-[#FAFAF9] px-3.5 py-3 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#A5A49D]">Descuento</p>
+                    <p className="mt-0.5 text-sm font-medium text-[#111110] truncate">{payMethodPayment.discountName}</p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      Number(payMethodPayment.discountAmount) > 0
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-[#F0EFEB] text-[#68685F]"
+                    }`}
+                  >
+                    {Number(payMethodPayment.discountAmount) > 0 ? "Aplicado" : "No aplicado"}
+                  </span>
+                </div>
+
+                <p className="text-xs text-[#68685F]">
+                  {Number(payMethodPayment.discountAmount) > 0
+                    ? <>Se descuentan <span className="font-mono font-semibold text-emerald-700">{formatMoney(payMethodPayment.discountAmount)}</span> sobre {formatMoney(payMethodPayment.baseAmount)}.</>
+                    : payMethodPayment.status === "EXPIRED"
+                      ? "No se aplica porque la cuota está vencida."
+                      : "No se está aplicando a esta cuota."}
+                  {payMethodPayment.discountOverride !== null && (
+                    <span className="text-[#A5A49D]"> · decisión manual</span>
+                  )}
+                </p>
+
+                <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleDiscount(payMethodPayment.id, Number(payMethodPayment.discountAmount) <= 0)}
+                    disabled={togglingDiscountId === payMethodPayment.id}
+                    className="cursor-pointer rounded-lg border border-[#E5E4E0] bg-white px-3 py-1.5 text-xs font-semibold text-[#111110] transition-colors hover:border-[#111110] hover:bg-[#F0EFEB] disabled:opacity-40"
+                  >
+                    {togglingDiscountId === payMethodPayment.id
+                      ? "\u2026"
+                      : Number(payMethodPayment.discountAmount) > 0 ? "No aplicar el descuento" : "Aplicar el descuento igual"}
+                  </button>
+                  {payMethodPayment.discountOverride !== null && (
+                    <button
+                      type="button"
+                      onClick={() => handleToggleDiscount(payMethodPayment.id, null)}
+                      disabled={togglingDiscountId === payMethodPayment.id}
+                      className="cursor-pointer text-xs font-medium text-[#68685F] underline underline-offset-2 transition-colors hover:text-[#111110] disabled:opacity-40"
+                    >
+                      Volver al automático
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-3">
               {METHOD_BUTTONS.map((m) => (
                 <button

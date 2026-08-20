@@ -45,6 +45,7 @@ vi.mock("@/modules/payments/payments.service", () => ({
   getPaymentsByStudent: vi.fn(async () => []),
   generateMonthlyPayments: vi.fn(async () => []),
   updatePayment: vi.fn(async () => ({ id: "p" })),
+  setDiscountOverride: vi.fn(async () => ({ id: "p" })),
   deletePayment: vi.fn(async () => undefined),
 }))
 

@@ -74,7 +74,7 @@ describe("deleteDiscount", () => {
     expect(db.payment.update).toHaveBeenCalledTimes(1)
     expect(db.payment.update).toHaveBeenCalledWith({
       where: { id: "cpayment0000000000000001" },
-      data: { amount: 30000, discountAmount: 0, discountId: null, discountName: null },
+      data: { amount: 30000, discountAmount: 0, discountId: null, discountName: null, discountOverride: null },
     })
   })
 
@@ -112,7 +112,7 @@ describe("removeStudentDiscount", () => {
     expect(db.studentDiscount.delete).toHaveBeenCalledWith({ where: { id: IDS.assignment1 } })
     expect(db.payment.update).toHaveBeenCalledWith({
       where: { id: "cpayment0000000000000001" },
-      data: { amount: 30000, discountAmount: 0, discountId: null, discountName: null },
+      data: { amount: 30000, discountAmount: 0, discountId: null, discountName: null, discountOverride: null },
     })
   })
 
