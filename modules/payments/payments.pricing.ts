@@ -10,7 +10,7 @@ import type { UpdatePaymentInput } from "./payments.schema"
 /** Lo único que hace falta del pago guardado para poder recalcularlo. */
 type StoredPayment = Pick<
   Payment,
-  "amount" | "baseAmount" | "paymentMethod" | "period" | "paidAt" | "lateFeeWaived"
+  "amount" | "baseAmount" | "paymentMethod" | "period" | "paidAt" | "lateFeeWaived" | "manualAdjustment"
 > & {
   /** El alumno define el vencimiento de la cuota y si está exento de la mora. */
   student: Pick<Student, "dueDay" | "lateFeeExempt">
@@ -24,6 +24,8 @@ export type PaymentAmountFields = {
   lateFee?: number | null
   lateDays?: number | null
   lateFeeWaived?: boolean
+  manualAdjustment?: number | null
+  manualAdjustmentReason?: string | null
   paymentMethod?: PaymentMethod | null
 }
 
@@ -31,18 +33,28 @@ export type PricingResult =
   | { ok: true; fields: PaymentAmountFields }
   | { ok: false; disabledMethod: PaymentMethod }
 
+/** Un motivo vacío es lo mismo que no haber escrito ninguno. */
+function normalizeReason(reason: string | null | undefined): string | null {
+  const clean = reason?.trim()
+  return clean ? clean : null
+}
+
 /**
  * Decide qué montos hay que guardar al actualizar un pago.
  *
- * Se aplican dos reglas del gimnasio, en este orden:
- *  1. el recargo por mora, que engorda la deuda según los días de atraso, y
+ * Se aplican dos reglas del gimnasio y, arriba de todo, la decisión de quien
+ * cobra, en este orden:
+ *  1. el recargo por mora, que engorda la deuda según los días de atraso,
  *  2. el recargo o descuento del medio de pago, que se calcula sobre la deuda
- *     ya con la mora incluida — el medio ajusta lo que se termina cobrando.
+ *     ya con la mora incluida — el medio ajusta lo que se termina cobrando, y
+ *  3. el ajuste manual: si quien cobra dice cuánto se cobró de verdad
+ *     (`chargedAmount`), ese es el monto, y la diferencia contra lo que daban
+ *     las reglas queda registrada como `manualAdjustment`.
  *
  * De ahí la descomposición que queda guardada:
- *   `amount` = `baseAmount` + `lateFee` + `methodAdjustment`
+ *   `amount` = `baseAmount` + `lateFee` + `methodAdjustment` + `manualAdjustment`
  * con `baseAmount` = la cuota limpia, `lateFee` = la mora congelada al cobrar y
- * `methodAdjustment` firmado (+ recargo / − descuento).
+ * los dos ajustes firmados (+ se cobró de más / − se cobró de menos).
  */
 export async function resolvePaymentAmounts(
   gymId: string,
@@ -51,7 +63,7 @@ export async function resolvePaymentAmounts(
 ): Promise<PricingResult> {
   const cuota = existing.baseAmount !== null ? Number(existing.baseAmount) : undefined
 
-  // Despagar, o sacarle el medio de pago: se van la mora y el ajuste con él, y
+  // Despagar, o sacarle el medio de pago: se van la mora y los ajustes con él, y
   // el pago vuelve a deber la cuota limpia.
   if ((input.status && input.status !== "PAID") || input.paymentMethod === null) {
     return {
@@ -63,8 +75,10 @@ export async function resolvePaymentAmounts(
         methodAdjustment: null,
         lateFee: null,
         lateDays: null,
-        // La condonación era para ese cobro: al despagar vuelve a estar en juego.
+        // La condonación y el ajuste eran de ese cobro: al despagar se van con él.
         lateFeeWaived: false,
+        manualAdjustment: null,
+        manualAdjustmentReason: null,
       },
     }
   }
@@ -77,6 +91,7 @@ export async function resolvePaymentAmounts(
     input.paymentMethod !== undefined ||
     input.amount !== undefined ||
     input.lateFeeWaived !== undefined ||
+    input.chargedAmount !== undefined ||
     input.status === "PAID"
 
   if (!method || !repricing) return { ok: true, fields: {} }
@@ -100,7 +115,23 @@ export async function resolvePaymentAmounts(
   const { fee, lateDays } = lateFeeFor(baseAmount, existing.period, existing.student.dueDay, lateConfig, chargedAt)
   const lateFee = exempt ? 0 : fee
 
-  const { amount, adjustment } = applyMethodAdjustment(round2(baseAmount + lateFee), config)
+  // Lo que dan las reglas del gimnasio, antes de que nadie lo toque a mano.
+  const { amount: ruled, adjustment } = applyMethodAdjustment(round2(baseAmount + lateFee), config)
+
+  // El ajuste manual: el que se decide en este cobro, o el que el pago ya traía
+  // si esta edición no lo toca (corregirle el medio no borra el redondeo que se
+  // le hizo al alumno). `chargedAmount: null` lo borra.
+  const manual =
+    input.chargedAmount !== undefined
+      ? input.chargedAmount === null
+        ? 0
+        : round2(input.chargedAmount - ruled)
+      : Number(existing.manualAdjustment ?? 0)
+
+  // Cobrado de verdad. El piso en 0 puede recortar el ajuste, así que el que se
+  // guarda se deriva del monto final: la descomposición tiene que cerrar siempre.
+  const amount = Math.max(round2(ruled + manual), 0)
+  const manualAdjustment = round2(amount - ruled)
 
   return {
     ok: true,
@@ -111,6 +142,12 @@ export async function resolvePaymentAmounts(
       lateDays,
       lateFeeWaived: waived,
       methodAdjustment: adjustment,
+      manualAdjustment,
+      // Un cobro que fija el monto a mano trae su propio motivo: el de un ajuste
+      // anterior no describe esta decisión.
+      ...(input.chargedAmount !== undefined
+        ? { manualAdjustmentReason: manualAdjustment === 0 ? null : normalizeReason(input.manualAdjustmentReason) }
+        : {}),
       paymentMethod: method,
     },
   }

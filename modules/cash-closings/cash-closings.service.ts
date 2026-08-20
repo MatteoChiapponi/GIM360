@@ -34,9 +34,18 @@ export async function createCashClosing(input: CreateCashClosingInput) {
     let cashCount = 0, cashTotal = 0
     let transferCount = 0, transferTotal = 0
     let cardCount = 0, cardTotal = 0
+    // Lo que se cobró de más o de menos porque alguien lo ajustó a mano al
+    // cobrar. Ya está dentro de `amount`; el cierre lo muestra aparte para que
+    // la diferencia contra lo que decían las cuotas quede a la vista.
+    let adjustmentsCount = 0, adjustmentsTotal = 0
 
     for (const p of paidPayments) {
       const amount = Number(p.amount)
+      const manual = Number(p.manualAdjustment ?? 0)
+      if (manual !== 0) {
+        adjustmentsCount++
+        adjustmentsTotal += manual
+      }
       switch (p.paymentMethod) {
         case "CASH":
           cashCount++; cashTotal += amount; break
@@ -50,6 +59,7 @@ export async function createCashClosing(input: CreateCashClosingInput) {
     cashTotal = round2(cashTotal)
     transferTotal = round2(transferTotal)
     cardTotal = round2(cardTotal)
+    adjustmentsTotal = round2(adjustmentsTotal)
 
     const fromDate = paidPayments[0].paidAt!
     const toDate = paidPayments[paidPayments.length - 1].paidAt!
@@ -67,6 +77,8 @@ export async function createCashClosing(input: CreateCashClosingInput) {
         transferTotal,
         cardCount,
         cardTotal,
+        adjustmentsCount,
+        adjustmentsTotal,
         notes: input.notes,
       },
     })

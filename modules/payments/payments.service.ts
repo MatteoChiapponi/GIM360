@@ -3,15 +3,19 @@ import type { PaymentMethod } from "@/app/generated/prisma/client"
 import { lateDaysAt } from "@/lib/late-fee"
 import type { UpdatePaymentInput } from "./payments.schema"
 
-type UpdatePaymentData = Omit<UpdatePaymentInput, "paymentMethod"> & {
+/** `chargedAmount` es la intención de quien cobra, no una columna: lo traduce
+ *  `resolvePaymentAmounts` a `manualAdjustment` antes de llegar hasta acá. */
+type UpdatePaymentData = Omit<UpdatePaymentInput, "paymentMethod" | "chargedAmount"> & {
   paymentMethod?: PaymentMethod | null
-  /** Monto de la cuota antes del ajuste del medio de pago */
+  /** Monto de la cuota antes de los ajustes */
   baseAmount?: number | null
-  /** Ajuste aplicado, firmado (+ recargo / − descuento) */
+  /** Ajuste del medio de pago, firmado (+ recargo / − descuento) */
   methodAdjustment?: number | null
   /** Recargo por mora congelado al cobrar, y los días de atraso con los que salió */
   lateFee?: number | null
   lateDays?: number | null
+  /** Diferencia que puso a mano quien cobró, firmada */
+  manualAdjustment?: number | null
 }
 
 /** Parses "YYYY-MM" into the first-day-of-month Date (UTC) */
@@ -160,7 +164,8 @@ export async function getPaymentsByStudent(studentId: string) {
   })
 }
 
-/** Updates a payment (status, paidAt, notes, amount, paymentMethod, el recargo por mora y el ajuste del medio de pago) */
+/** Updates a payment (status, paidAt, notes, amount, paymentMethod, el recargo por
+ *  mora y los ajustes — el del medio de pago y el que se puso a mano al cobrar) */
 export async function updatePayment(id: string, data: UpdatePaymentData) {
   return db.payment.update({
     where: { id },

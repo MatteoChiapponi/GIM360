@@ -12,3 +12,6 @@ export const round2 = (n: number) => Math.round(n * 100) / 100
 
 /** "$12.500" — formato de pesos para la UI. */
 export const formatMoney = (n: number) => `$${n.toLocaleString("es-AR")}`
+
+/** "+$500" / "−$500" — un ajuste firmado, con el signo bien puesto para la UI. */
+export const signedMoney = (n: number) => `${n < 0 ? "−" : "+"}${formatMoney(Math.abs(n))}`

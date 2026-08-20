@@ -91,6 +91,8 @@ export function paymentRow(overrides: Record<string, unknown> = {}) {
     lateFee: null,
     lateDays: null,
     lateFeeWaived: false,
+    manualAdjustment: null,
+    manualAdjustmentReason: null,
     paymentMethod: null,
     paidAt: null,
     student: { dueDay: PAYMENT_FIXTURE.dueDay, lateFeeExempt: false },

@@ -4,7 +4,7 @@ import { db } from "@/lib/db"
 import { withAuthParams } from "@/lib/with-auth"
 import { paymentBelongsToGym, gymIsActive, gymBelongsToUser, gymBelongsToOwner } from "@/modules/belongs/belongs.service"
 import { updatePayment, deletePayment } from "@/modules/payments/payments.service"
-import { updatePaymentSchema } from "@/modules/payments/payments.schema"
+import { updatePaymentSchema, persistablePaymentSchema } from "@/modules/payments/payments.schema"
 import { resolvePaymentAmounts } from "@/modules/payments/payments.pricing"
 import { logger } from "@/lib/logger"
 
@@ -67,7 +67,8 @@ export const PATCH = withAuthParams<Params>([UserRole.OWNER, UserRole.RECEPTIONI
     return NextResponse.json({ error: "El medio de pago no está habilitado" }, { status: 400 })
   }
 
-  const result = await updatePayment(id, { ...parsed.data, ...pricing.fields })
+  const updates = persistablePaymentSchema.parse(parsed.data)
+  const result = await updatePayment(id, { ...updates, ...pricing.fields })
   logger.info("Payment updated", { id, ...pricing.fields })
   return NextResponse.json(result)
 })

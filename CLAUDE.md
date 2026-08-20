@@ -80,7 +80,7 @@ if (session.user.role === "TRAINER") {
 | `lib/auth.ts` | NextAuth config — authorize logic with bcrypt, JWT/session callbacks propagate `id` and `role` |
 | `lib/db.ts` | Prisma singleton — uses `PrismaPg` adapter; `DATABASE_URL` must be set |
 | `lib/utils.ts` | `cn()` helper (clsx + tailwind-merge) |
-| `lib/money.ts` | `round2()` y `formatMoney()` — el redondeo de todo monto que se guarda, compartido por servicios y vistas |
+| `lib/money.ts` | `round2()`, `formatMoney()` y `signedMoney()` — el redondeo de todo monto que se guarda, compartido por servicios y vistas |
 | `lib/payment-methods.ts` | Parte client-safe de los medios de pago: valores, etiquetas y la fórmula del ajuste |
 | `lib/late-fee.ts` | Parte client-safe de la mora: vencimiento, días de atraso y la fórmula del recargo |
 | `lib/timezone.ts` | **La zona horaria del proyecto: Argentina.** Todo cálculo de fecha pasa por acá — ver más abajo |
@@ -224,7 +224,8 @@ gimnasio entra por fuera del alta (un insert a mano, un restore).
   puedan calcular distinto.
 - **Cobro**: el ajuste lo calcula el backend en `PATCH /api/payments/:id`, nunca el cliente. Guarda
   `baseAmount` (la cuota), `methodAdjustment` (firmado) y deja en `amount` el monto realmente
-  cobrado, que es el que suman cierres de caja y métricas. Cobrar con un medio deshabilitado da 400.
+  cobrado, que es el que suman cierres de caja y métricas (ahí también entra el ajuste manual, ver
+  más abajo). Cobrar con un medio deshabilitado da 400.
   Al despagar, `amount` vuelve a `baseAmount` y el ajuste se limpia.
 
 **Dónde impacta que `amount` ahora traiga el ajuste** — `amount` sigue siendo "la plata que entró",
@@ -270,10 +271,11 @@ aplicaciones es por bloque empezado — con `repeatEveryDays: 7`, ocho días de 
   congela en `Payment.lateFee` / `lateDays` recién en el `PATCH` que marca el pago.
 - **Contra qué fecha**: contra `paidAt`, no contra hoy. Reeditarle el medio a un pago viejo no le
   suma atraso que nunca existió.
-- **Orden de las dos reglas**: la mora entra primero, el ajuste del medio de pago después, sobre la
-  deuda ya con la mora incluida. La descomposición guardada es
-  `amount = baseAmount + lateFee + methodAdjustment`, con `baseAmount` = la cuota limpia.
-  Al despagar, `amount` vuelve a `baseAmount` y se limpia todo lo demás.
+- **Orden de las reglas**: la mora entra primero, el ajuste del medio de pago después, sobre la
+  deuda ya con la mora incluida, y al final el ajuste manual de quien cobra. La descomposición
+  guardada es `amount = baseAmount + lateFee + methodAdjustment + manualAdjustment`, con
+  `baseAmount` = la cuota limpia. Al despagar, `amount` vuelve a `baseAmount` y se limpia todo lo
+  demás.
 - **Dos formas de no cobrarlo**: `Student.lateFeeExempt` exime al alumno de forma permanente (beca,
   arreglo particular) y `Payment.lateFeeWaived` condona una cuota puntual desde el modal de cobro.
   Ambas dejan `lateDays` cargado — lo que se perdona es el monto, no el registro del atraso. La
@@ -289,6 +291,36 @@ aplicaciones es por bloque empezado — con `repeatEveryDays: 7`, ocho días de 
 | `cash-closings` / métricas | La mora entra en `amount`, así que suma como ingreso real igual que un recargo por medio de pago. |
 | `totalPendingRevenue` | Es la cuota sin mora: lo acumulado todavía no se cobró y podría condonarse. |
 | Recordatorio de WhatsApp | Si ya corrió mora, el aviso manda el total de hoy — avisar solo la cuota sería un número que después no coincide con el cobro. |
+
+### Ajuste manual al cobrar
+
+Las dos reglas de arriba las define el gimnasio de antemano. Arriba de las dos está la persona que
+cobra: redondeó, le faltaban doscientos pesos, se arregló por otra cifra. Eso se registra como
+`Payment.manualAdjustment` — la diferencia firmada entre lo que dieron las reglas y lo que se cobró
+de verdad — con `manualAdjustmentReason` para dejar dicho por qué. Lo pueden hacer el owner y la
+recepcionista, que son los dos que cobran.
+
+- **Qué manda el cliente**: `chargedAmount`, el monto que se cobró. No manda el ajuste: el backend
+  rehace la cuenta de las reglas y la diferencia contra ese monto es el ajuste. Solo viaja cuando
+  alguien tocó el monto — mandarlo siempre convertiría en "ajuste manual" cualquier diferencia con
+  la cuenta del backend, que para una cuota vencida cambia con los días.
+- **Contra qué se mide**: contra cuota + mora + ajuste del medio, o sea el total ya con las dos
+  reglas aplicadas. Cambiar el medio o condonar la mora mueve ese total, y el modal reescribe el
+  monto sugerido: un redondeo hecho sobre otro total no describe este cobro.
+- **Qué lo borra**: `chargedAmount: null` (vuelve al monto calculado) y despagar, que se lleva todo.
+  Una edición que no manda `chargedAmount` lo conserva: corregirle el medio a un pago cobrado no
+  borra el redondeo que se le hizo al alumno.
+- **El piso**: `amount` nunca queda negativo, y el ajuste guardado se deriva del monto final, así que
+  la descomposición cierra siempre.
+
+**Dónde impacta**:
+
+| Lugar | Efecto |
+|---|---|
+| `cash-closings` | `amount` ya lo trae, así que los totales por medio salen bien. El cierre además guarda `adjustmentsCount` / `adjustmentsTotal`: cuánto de lo cobrado salió de ajustes hechos a mano, para poder mirarlo contra lo que decían las cuotas |
+| `gym-metrics` y las métricas por grupo | Igual que el ajuste del medio: entra en lo cobrado, que es plata que entró (o que se resignó) de verdad |
+| `totalPendingRevenue` | No lo ve: el ajuste se decide al cobrar, y lo que está impago todavía vale lo que dice la cuota |
+| Recordatorio de WhatsApp | Tampoco: avisa lo que hay que pagar, no lo que se va a terminar acordando en el mostrador |
 
 ### Route groups
 - `app/(auth)/` — public routes (`/login`)
@@ -313,6 +345,7 @@ Lo que sí se mockea: `@/lib/auth` (la sesión), `@/lib/logger` y los servicios 
 | `tests/timezone.test.ts` | Los helpers de fecha, corridos en cuatro zonas de runtime: el resultado no puede cambiar |
 | `tests/payment-methods.test.ts` | Cálculo del recargo/descuento, cobro con la config del gimnasio, medio deshabilitado, invariante de "al menos uno habilitado" |
 | `tests/late-fee.test.ts` | Días de atraso y fórmula de la mora, orden mora → medio de pago, exención y condonación, congelado contra `paidAt`, validación de la regla |
+| `tests/manual-adjustment.test.ts` | El monto ajustado a mano al cobrar: el ajuste como diferencia contra las reglas, la descomposición que cierra, qué lo borra y qué lo conserva, y su resumen en el cierre de caja |
 
 Al agregar un endpoint que acepte más de un rol, sumalo al catálogo de `api-access.test.ts`: las
 listas `RECEPTIONIST_ALLOWED` / `RECEPTIONIST_DENIED` son la definición ejecutable de los permisos.

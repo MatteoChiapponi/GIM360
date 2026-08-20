@@ -53,6 +53,7 @@ function table(rows: Row[] = []) {
     update: vi.fn(),
     delete: vi.fn(),
     deleteMany: vi.fn(),
+    updateMany: vi.fn(),
     count: vi.fn(),
     upsert: vi.fn(),
   }
