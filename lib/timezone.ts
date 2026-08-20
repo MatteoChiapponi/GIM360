@@ -57,33 +57,42 @@ const partsFormatter = new Intl.DateTimeFormat("en-US", {
   hour: "2-digit",
   minute: "2-digit",
   second: "2-digit",
-  weekday: "short",
 })
-
-const WEEKDAY_INDEX: Record<string, number> = {
-  Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
-}
 
 /** Descompone un instante en la hora de pared de Buenos Aires. */
 export function argentinaParts(at: Date = new Date()): DateParts {
+  if (Number.isNaN(at.getTime())) {
+    throw new RangeError("argentinaParts recibió una fecha inválida")
+  }
+
   const parts: Record<string, string> = {}
   for (const p of partsFormatter.formatToParts(at)) parts[p.type] = p.value
 
+  const year = Number(parts.year)
+  const month = Number(parts.month)
+  const day = Number(parts.day)
+
   return {
-    year: Number(parts.year),
-    month: Number(parts.month),
-    day: Number(parts.day),
+    year,
+    month,
+    day,
     hour: Number(parts.hour),
     minute: Number(parts.minute),
     second: Number(parts.second),
-    weekday: WEEKDAY_INDEX[parts.weekday] ?? 0,
+    // El día de la semana sale de la fecha, no de un nombre localizado: parsear
+    // el string del formatter dependía de cómo lo escriba el ICU de turno, y un
+    // fallback silencioso ahí significa mostrar los horarios del día equivocado.
+    weekday: new Date(Date.UTC(year, month - 1, day)).getUTCDay(),
   }
 }
 
 /** Diferencia entre la hora de pared argentina y UTC, en ms, para ese instante. */
 function offsetMs(at: Date): number {
   const p = argentinaParts(at)
-  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second, at.getMilliseconds()) - at.getTime()
+  return (
+    Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second, at.getUTCMilliseconds()) -
+    at.getTime()
+  )
 }
 
 /**
@@ -109,11 +118,6 @@ export function argentinaDate(
   ts = wall - offsetMs(new Date(ts))
   ts = wall - offsetMs(new Date(ts))
   return new Date(ts)
-}
-
-/** Ahora. Existe para que el resto del código no vuelva a escribir `new Date()`. */
-export function now(): Date {
-  return new Date()
 }
 
 /** "YYYY-MM-DD" del día argentino de ese instante. */

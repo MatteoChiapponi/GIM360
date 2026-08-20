@@ -154,6 +154,47 @@ describe("lib/timezone", () => {
     })
   })
 
+  it("el día de la semana es correcto todos los días de un año", () => {
+    // Se deriva de la fecha, no de un nombre localizado. Un error acá muestra
+    // los horarios del día equivocado, así que se barre un año entero.
+    inEveryZone(() => {
+      let cursor = fromISODate("2026-01-01")
+      // 2026-01-01 fue jueves.
+      let expected = 4
+      for (let i = 0; i < 365; i++) {
+        expect(weekday(cursor)).toBe(expected)
+        expect(weekdayName(cursor)).toBe(
+          ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"][expected],
+        )
+        cursor = addDays(cursor, 1)
+        expected = (expected + 1) % 7
+      }
+    })
+  })
+
+  it("el día de la semana no cambia dentro del mismo día argentino", () => {
+    inEveryZone(() => {
+      // 21:00 y 23:59 del jueves argentino: para UTC ya es viernes.
+      expect(weekdayName(new Date("2026-08-21T00:00:00Z"))).toBe("THURSDAY")
+      expect(weekdayName(new Date("2026-08-21T02:59:00Z"))).toBe("THURSDAY")
+      expect(weekdayName(new Date("2026-08-21T03:00:00Z"))).toBe("FRIDAY")
+    })
+  })
+
+  it("rechaza una fecha inválida en vez de devolver NaN", () => {
+    inEveryZone(() => {
+      expect(() => argentinaParts(new Date("no es una fecha"))).toThrow(RangeError)
+    })
+  })
+
+  it("no pierde los milisegundos al reconstruir un instante", () => {
+    inEveryZone(() => {
+      expect(argentinaDate(2026, 8, 20, 22, 30, 15, 123).toISOString()).toBe(
+        "2026-08-21T01:30:15.123Z",
+      )
+    })
+  })
+
   it("todayISO y currentPeriod son coherentes entre sí", () => {
     inEveryZone(() => {
       expect(todayISO()).toMatch(/^\d{4}-\d{2}-\d{2}$/)
