@@ -1,4 +1,5 @@
 import { db } from "@/lib/db"
+import { round2 } from "@/lib/money"
 
 interface CreateCashClosingInput {
   gymId: string
@@ -26,8 +27,6 @@ export async function createCashClosing(input: CreateCashClosingInput) {
     if (paidPayments.length === 0) {
       throw new Error("No hay pagos cobrados sin verificar")
     }
-
-    const round2 = (n: number) => Math.round(n * 100) / 100
 
     const totalCollected = round2(paidPayments.reduce((sum, p) => sum + Number(p.amount), 0))
 

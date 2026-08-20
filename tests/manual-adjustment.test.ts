@@ -124,6 +124,29 @@ describe("Quien cobra puede ajustar el monto de la cuota", () => {
     expect(res.status).toBe(400)
     expect(mockUpdatePayment).not.toHaveBeenCalled()
   })
+
+  it("los centavos del ajuste se redondean a dos decimales", async () => {
+    await markPaid({ chargedAmount: 9999.99 })
+
+    expect(savedFields()).toMatchObject({ amount: 9999.99, manualAdjustment: -0.01 })
+  })
+
+  it("no se puede fijar el monto de una cuota que no se está cobrando", async () => {
+    // Sin medio de pago no hay cobro: contestar 200 sería mentir sobre lo guardado
+    const res = await patch({ chargedAmount: 9500 })
+
+    expect(res.status).toBe(400)
+    expect(mockUpdatePayment).not.toHaveBeenCalled()
+  })
+
+  it("un pago ya verificado no se puede ajustar: la caja está cerrada", async () => {
+    seed("payment", [paymentRow({ status: "PAID", verified: true, paymentMethod: "CASH", paidAt: PAID_AT })])
+
+    const res = await patch({ chargedAmount: 9500 })
+
+    expect(res.status).toBe(409)
+    expect(mockUpdatePayment).not.toHaveBeenCalled()
+  })
 })
 
 // ─── El orden de las reglas ──────────────────────────────────────────────────
@@ -218,6 +241,21 @@ describe("Un ajuste ya guardado sobrevive a las ediciones que no lo tocan", () =
     })
   })
 
+  it("si el ajuste se queda en cero el motivo se va con él", async () => {
+    seed("payment", [paymentRow(paid)])
+    // Un descuento del 100% deja el total en 0, y el piso se come el ajuste:
+    // el motivo guardado ya no describe nada.
+    seedConfigs([{ method: "CASH", enabled: true, adjustmentType: "DISCOUNT", adjustmentPercent: 100 }])
+
+    await patch({ paymentMethod: "CASH" })
+
+    expect(savedFields()).toMatchObject({
+      amount: 0,
+      manualAdjustment: 0,
+      manualAdjustmentReason: null,
+    })
+  })
+
   it("despagar limpia el ajuste junto con el resto", async () => {
     seed("payment", [paymentRow(paid)])
 
@@ -267,6 +305,26 @@ describe("El cierre de caja registra lo que se ajustó a mano", () => {
           cashTotal: 29700,
           adjustmentsCount: 2,
           adjustmentsTotal: -300,
+        }),
+      }),
+    )
+  })
+
+  it("un pago excluido del cierre no suma su ajuste", async () => {
+    seed("payment", [
+      paidPayment({ id: "cpayment0000000000000001", amount: "9500", manualAdjustment: "-500" }),
+      paidPayment({ id: "cpayment0000000000000002", amount: "10200", manualAdjustment: "200" }),
+    ])
+
+    await createCashClosing({ gymId: IDS.gym1, excludedPaymentIds: ["cpayment0000000000000002"] })
+
+    expect(db.cashClosing.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          totalCollected: 9500,
+          paidCount: 1,
+          adjustmentsCount: 1,
+          adjustmentsTotal: -500,
         }),
       }),
     )

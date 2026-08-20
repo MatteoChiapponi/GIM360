@@ -24,8 +24,13 @@ export function matchesWhere(row: Row | undefined, where: Row): boolean {
 
     const actual = row[key]
 
-    // Filtro anidado por relación, ej. { owner: { userId } }
     if (expected !== null && typeof expected === "object" && !Array.isArray(expected)) {
+      // Operadores de Prisma que usan los servicios, ej. { id: { notIn: [...] } }
+      const op = expected as Record<string, unknown>
+      if (Array.isArray(op.in)) return op.in.includes(actual)
+      if (Array.isArray(op.notIn)) return !op.notIn.includes(actual)
+
+      // Filtro anidado por relación, ej. { owner: { userId } }
       return matchesWhere(actual as Row | undefined, expected as Row)
     }
 

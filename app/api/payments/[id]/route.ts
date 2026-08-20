@@ -63,8 +63,15 @@ export const PATCH = withAuthParams<Params>([UserRole.OWNER, UserRole.RECEPTIONI
 
   const pricing = await resolvePaymentAmounts(gymId, existing, parsed.data)
   if (!pricing.ok) {
-    logger.warn("Disabled payment method", { paymentId: id, gymId, method: pricing.disabledMethod })
-    return NextResponse.json({ error: "El medio de pago no está habilitado" }, { status: 400 })
+    if (pricing.error === "disabled-method") {
+      logger.warn("Disabled payment method", { paymentId: id, gymId, method: pricing.method })
+      return NextResponse.json({ error: "El medio de pago no está habilitado" }, { status: 400 })
+    }
+    logger.warn("Charged amount without a payment method", { paymentId: id, gymId })
+    return NextResponse.json(
+      { error: "Solo se puede ajustar el monto al cobrar la cuota" },
+      { status: 400 },
+    )
   }
 
   const updates = persistablePaymentSchema.parse(parsed.data)

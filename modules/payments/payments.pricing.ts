@@ -31,7 +31,10 @@ export type PaymentAmountFields = {
 
 export type PricingResult =
   | { ok: true; fields: PaymentAmountFields }
-  | { ok: false; disabledMethod: PaymentMethod }
+  /** El medio elegido está deshabilitado para ese gimnasio. */
+  | { ok: false; error: "disabled-method"; method: PaymentMethod }
+  /** Se quiso fijar el monto cobrado de una cuota que no se está cobrando. */
+  | { ok: false; error: "not-charging" }
 
 /** Un motivo vacío es lo mismo que no haber escrito ninguno. */
 function normalizeReason(reason: string | null | undefined): string | null {
@@ -94,13 +97,17 @@ export async function resolvePaymentAmounts(
     input.chargedAmount !== undefined ||
     input.status === "PAID"
 
+  // Sin medio de pago no hay cobro, y sin cobro no hay monto que ajustar: dejarlo
+  // pasar en silencio sería contestar 200 a algo que no se guardó.
+  if (!method && input.chargedAmount != null) return { ok: false, error: "not-charging" }
+
   if (!method || !repricing) return { ok: true, fields: {} }
 
   const [config, lateConfig] = await Promise.all([
     getPaymentMethodConfig(gymId, method),
     getLateFeeConfig(gymId),
   ])
-  if (!config.enabled) return { ok: false, disabledMethod: method }
+  if (!config.enabled) return { ok: false, error: "disabled-method", method }
 
   // La cuota limpia: la que se manda, la que ya estaba guardada como base, o el
   // monto actual si el pago todavía no tenía ajustes.
@@ -143,11 +150,16 @@ export async function resolvePaymentAmounts(
       lateFeeWaived: waived,
       methodAdjustment: adjustment,
       manualAdjustment,
-      // Un cobro que fija el monto a mano trae su propio motivo: el de un ajuste
-      // anterior no describe esta decisión.
-      ...(input.chargedAmount !== undefined
-        ? { manualAdjustmentReason: manualAdjustment === 0 ? null : normalizeReason(input.manualAdjustmentReason) }
-        : {}),
+      // El motivo sigue al ajuste: si no quedó ajuste no hay nada que explicar, y
+      // un cobro que fija el monto a mano trae el suyo — el de un ajuste anterior
+      // no describe esta decisión. Si la edición no toca el monto, `undefined`
+      // deja intacto el motivo que ya estaba guardado.
+      manualAdjustmentReason:
+        manualAdjustment === 0
+          ? null
+          : input.chargedAmount !== undefined
+            ? normalizeReason(input.manualAdjustmentReason)
+            : undefined,
       paymentMethod: method,
     },
   }
