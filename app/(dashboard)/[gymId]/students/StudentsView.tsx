@@ -20,6 +20,7 @@ import {
   type PaymentMethodValue as PaymentMethod,
 } from "@/lib/payment-methods"
 import { formatMoney } from "@/lib/money"
+import { formatDate, formatMonthYear, fromISODate } from "@/lib/timezone"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ const DAY_ORDER: Record<DayOfWeek, number> = {
 
 function fmtDate(iso: string | null) {
   if (!iso) return "—"
-  return new Date(iso).toLocaleDateString("es-AR")
+  return formatDate(iso)
 }
 
 function fmtCurrency(value: string | number) {
@@ -379,7 +380,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
     if (form.phone2.trim()) body.phone2 = form.phone2.trim()
     if (form.isTrial) {
       body.status = "TRIAL"
-      body.trialEndsAt = new Date(form.trialEndsAt).toISOString()
+      body.trialEndsAt = fromISODate(form.trialEndsAt).toISOString()
     }
 
     const res = await fetch("/api/students", {
@@ -810,8 +811,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
                       <div className="rounded-lg border border-[#E5E4E0] overflow-hidden">
                         {studentPayments.map((p, i) => {
                           const [year, month] = p.period.split("T")[0].split("-")
-                          const periodLabel = new Date(Number(year), Number(month) - 1, 1)
-                            .toLocaleDateString("es-AR", { month: "long", year: "numeric" })
+                          const periodLabel = formatMonthYear(`${year}-${month}`)
                           const statusColors: Record<PaymentStatus, string> = {
                             PAID: "text-emerald-700", PENDING: "text-amber-700", EXPIRED: "text-red-700",
                           }
@@ -829,7 +829,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
                                 <p className="text-xs text-[#A5A49D]">
                                   {p.paymentMethod ? PAYMENT_METHOD_LABEL[p.paymentMethod] : "—"}
                                   {adjustment !== 0 && ` ${adjustment > 0 ? "+" : "−"}${formatMoney(Math.abs(adjustment))}`}
-                                  {p.paidAt ? ` · ${new Date(p.paidAt).toLocaleDateString("es-AR")}` : ""}
+                                  {p.paidAt ? ` · ${formatDate(p.paidAt)}` : ""}
                                   {p.verified ? " · ✓" : ""}
                                 </p>
                               </div>

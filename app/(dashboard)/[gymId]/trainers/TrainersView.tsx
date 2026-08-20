@@ -15,6 +15,7 @@ import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
 import { FormModal } from "@/components/ui/FormModal"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
+import { argentinaParts, formatDate, fromISODate, toISODate } from "@/lib/timezone"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -79,10 +80,10 @@ function formatCurrency(n: number): string {
 }
 
 function formatSeniority(startedAt: string): string {
-  const start = new Date(startedAt)
-  const now = new Date()
-  let years = now.getFullYear() - start.getFullYear()
-  let months = now.getMonth() - start.getMonth()
+  const start = argentinaParts(new Date(startedAt))
+  const now = argentinaParts()
+  let years = now.year - start.year
+  let months = now.month - start.month
   if (months < 0) { years -= 1; months += 12 }
   if (years === 0 && months === 0) return "Menos de 1 mes"
   if (years === 0) return `${months} ${months === 1 ? "mes" : "meses"}`
@@ -222,7 +223,7 @@ export default function TrainersView({ gymId }: { gymId: string }) {
 
     setSubmitting(true)
     const createBody: Record<string, unknown> = { gymId, name: form.name.trim() }
-    if (form.startedAt) createBody.startedAt = new Date(form.startedAt).toISOString()
+    if (form.startedAt) createBody.startedAt = fromISODate(form.startedAt).toISOString()
     const res = await fetch("/api/trainers", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(createBody),
@@ -326,9 +327,7 @@ export default function TrainersView({ gymId }: { gymId: string }) {
 
   function startEdit() {
     if (!selectedTrainer) return
-    const dateValue = selectedTrainer.startedAt
-      ? new Date(selectedTrainer.startedAt).toISOString().split("T")[0]
-      : ""
+    const dateValue = selectedTrainer.startedAt ? toISODate(new Date(selectedTrainer.startedAt)) : ""
     setEditForm({ name: selectedTrainer.name, startedAt: dateValue })
     setShowEditModal(true)
     setEditError(null)
@@ -341,7 +340,7 @@ export default function TrainersView({ gymId }: { gymId: string }) {
     if (!editForm.name.trim()) { setEditError("El nombre es obligatorio."); return }
     setEditSubmitting(true)
     const patchBody: Record<string, unknown> = { name: editForm.name.trim() }
-    if (editForm.startedAt) patchBody.startedAt = new Date(editForm.startedAt).toISOString()
+    if (editForm.startedAt) patchBody.startedAt = fromISODate(editForm.startedAt).toISOString()
     else patchBody.startedAt = null
     const res = await fetch(`/api/trainers/${selectedTrainer.id}?gymId=${gymId}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -611,7 +610,7 @@ export default function TrainersView({ gymId }: { gymId: string }) {
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#A5A49D]">Fecha de inicio</span>
                     <span suppressHydrationWarning className="text-sm font-mono text-[#111110]">
-                      {new Date(selectedTrainer.startedAt).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                      {formatDate(selectedTrainer.startedAt, { day: "2-digit", month: "2-digit", year: "numeric" })}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">

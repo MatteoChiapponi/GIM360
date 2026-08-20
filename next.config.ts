@@ -1,4 +1,11 @@
 import type { NextConfig } from "next";
+import { TIMEZONE } from "./lib/timezone";
+
+// La zona horaria del proyecto es Argentina, no la del servidor (que está en
+// Estados Unidos). Esto la fija en el proceso que evalúa la config: el build y
+// el server de dev. El server de producción la vuelve a fijar en
+// `instrumentation.ts`, que es lo que corre en el arranque de cada instancia.
+process.env.TZ = TIMEZONE
 
 const allowedOrigins = process.env.AUTH_URL ? [process.env.AUTH_URL] : []
 

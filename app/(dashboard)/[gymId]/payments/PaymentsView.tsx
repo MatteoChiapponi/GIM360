@@ -28,6 +28,7 @@ import {
   lateDaysAt,
   type LateFeeConfig,
 } from "@/lib/late-fee"
+import { currentPeriod, formatDate, formatMonthYear, toPeriod } from "@/lib/timezone"
 
 type PaymentStatus = "PENDING" | "PAID" | "EXPIRED"
 
@@ -86,15 +87,9 @@ function paidAdjustment(p: Payment): number {
   return p.methodAdjustment ? Number(p.methodAdjustment) : 0
 }
 
-function toYearMonth(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
-}
+const toYearMonth = toPeriod
 
-function periodLabel(period: string): string {
-  const [y, m] = period.split("-").map(Number)
-  const d = new Date(y, m - 1)
-  return d.toLocaleDateString("es-AR", { month: "long", year: "numeric" })
-}
+const periodLabel = formatMonthYear
 
 function whatsappUrl(phone: string, message: string): string {
   const clean = phone.replace(/[\s\-()]/g, "")
@@ -108,7 +103,7 @@ function buildWhatsAppMessage(p: Payment, period: string, gymName: string, lateF
 
   if (p.status === "EXPIRED") {
     const due = dueDateFor(period, p.student.dueDay)
-    const fechaVenc = due.toLocaleDateString("es-AR")
+    const fechaVenc = formatDate(due)
     const atrasoTexto = `${daysLabel(lateDaysAt(period, p.student.dueDay))} de atraso`
     // Si el gimnasio cobra mora, el aviso dice el total al día de hoy: mandar solo
     // la cuota sería avisar un número que después no coincide con lo que se cobra.
@@ -123,15 +118,15 @@ function buildWhatsAppMessage(p: Payment, period: string, gymName: string, lateF
   const due = dueDateFor(period, p.student.dueDay)
   const now = new Date()
   const diffDays = Math.ceil((due.getTime() - now.getTime()) / 86400000)
-  const fechaVenc = due.toLocaleDateString("es-AR")
+  const fechaVenc = formatDate(due)
   const diasTexto = diffDays > 0 ? `faltan ${diffDays} día${diffDays !== 1 ? "s" : ""}` : "vence hoy"
 
   return `🏋️ *${gymName}* — Aviso automático\n\n¡Hola ${name}! 👋\n\nTe recordamos que tu cuota de *${mes}* por *${monto}* vence el *${fechaVenc}* (${diasTexto}) ⏰\n\nSi ya realizaste el pago podés ignorar este mensaje 😊\n\nAnte cualquier duda estamos a disposición. ¡Gracias! 💪`
 }
 
 export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: string; canCloseCash?: boolean }) {
-  const now = new Date()
-  const maxPeriod = toYearMonth(now)
+  // El período por defecto es el mes en curso en Argentina, no el del navegador.
+  const maxPeriod = currentPeriod()
   const [period, setPeriod] = useState(maxPeriod)
   const [minPeriod, setMinPeriod] = useState<string | undefined>(undefined)
   const [gymName, setGymName] = useState("")
@@ -553,7 +548,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
                         </span>
                         {p.paidAt && (
                           <span className="text-[10px] text-[#A5A49D]">
-                            {new Date(p.paidAt).toLocaleDateString("es-AR")}
+                            {formatDate(p.paidAt)}
                           </span>
                         )}
                       </div>
@@ -650,7 +645,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
           </button>
           <p className="text-sm font-semibold text-emerald-800">Pagos confirmados correctamente</p>
           <p className="text-xs text-emerald-600">
-            Período: {new Date(closingReport.fromDate).toLocaleDateString("es-AR")} — {new Date(closingReport.toDate).toLocaleDateString("es-AR")}
+            Período: {formatDate(closingReport.fromDate)} — {formatDate(closingReport.toDate)}
           </p>
           <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-emerald-700">
             <span>
@@ -733,7 +728,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
             key: "due",
             header: "Vencimiento",
             render: (p) => (
-              <span className="text-[#68685F]">{dueDateFor(period, p.student.dueDay).toLocaleDateString("es-AR")}</span>
+              <span className="text-[#68685F]">{formatDate(dueDateFor(period, p.student.dueDay))}</span>
             ),
           },
           {
@@ -786,7 +781,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
             header: "Fecha de pago",
             render: (p) => (
               <span className="text-[#A5A49D]">
-                {p.paidAt ? new Date(p.paidAt).toLocaleDateString("es-AR") : "—"}
+                {p.paidAt ? formatDate(p.paidAt) : "—"}
               </span>
             ),
           },

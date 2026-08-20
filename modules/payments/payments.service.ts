@@ -1,5 +1,6 @@
 import { db } from "@/lib/db"
 import type { PaymentMethod } from "@/app/generated/prisma/client"
+import { lateDaysAt } from "@/lib/late-fee"
 import type { UpdatePaymentInput } from "./payments.schema"
 
 type UpdatePaymentData = Omit<UpdatePaymentInput, "paymentMethod"> & {
@@ -109,9 +110,7 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
  *  PENDING → EXPIRED if due date passed. EXPIRED → PENDING if due date hasn't passed yet. */
 export async function expireOverduePayments(gymId: string, period: string) {
   const periodDate = parsePeriod(period)
-  const [year, month] = period.split("-").map(Number)
   const now = new Date()
-  const lastDay = new Date(year, month, 0).getDate()
 
   const payments = await db.payment.findMany({
     where: { gymId, period: periodDate, status: { in: ["PENDING", "EXPIRED"] } },
@@ -122,9 +121,11 @@ export async function expireOverduePayments(gymId: string, period: string) {
   const toRevert: string[] = []
 
   for (const p of payments) {
-    const due = new Date(year, month - 1, Math.min(p.student.dueDay, lastDay), 23, 59, 59)
-    if (p.status === "PENDING" && now > due) toExpire.push(p.id)
-    else if (p.status === "EXPIRED" && now <= due) toRevert.push(p.id)
+    // El vencimiento lo define `lateDaysAt`, que cierra el día a las 23:59:59
+    // de Argentina: con la hora del servidor una cuota vencería medio día antes.
+    const overdue = lateDaysAt(period, p.student.dueDay, now) > 0
+    if (p.status === "PENDING" && overdue) toExpire.push(p.id)
+    else if (p.status === "EXPIRED" && !overdue) toRevert.push(p.id)
   }
 
   await Promise.all([

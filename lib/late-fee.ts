@@ -11,6 +11,7 @@
  */
 
 import { round2 } from "./money"
+import { argentinaDate, daysInMonth } from "./timezone"
 
 export type LateFeeTypeValue = "FIXED" | "PERCENT"
 
@@ -52,24 +53,31 @@ export function periodKey(period: string | Date): string {
   return `${period.getUTCFullYear()}-${String(period.getUTCMonth() + 1).padStart(2, "0")}`
 }
 
+/** El día del mes en que vence la cuota, recortado si el mes es más corto. */
+function dueDayOf(period: string | Date, dueDay: number): [number, number, number] {
+  const [year, month] = periodKey(period).split("-").map(Number)
+  return [year, month, Math.min(dueDay, daysInMonth(year, month))]
+}
+
 /**
  * Fecha de vencimiento de una cuota: el `dueDay` del alumno dentro del mes del
  * período, recortado al último día si el mes es más corto (un dueDay 31 vence
- * el 28 de febrero). Devuelve la medianoche local de ese día.
+ * el 28 de febrero). Devuelve la medianoche argentina de ese día — no la del
+ * servidor, que está en Estados Unidos y adelantaría el vencimiento.
  */
 export function dueDateFor(period: string | Date, dueDay: number): Date {
-  const [year, month] = periodKey(period).split("-").map(Number)
-  const lastDay = new Date(year, month, 0).getDate()
-  return new Date(year, month - 1, Math.min(dueDay, lastDay))
+  const [year, month, day] = dueDayOf(period, dueDay)
+  return argentinaDate(year, month, day)
 }
 
 /**
  * Días de atraso a una fecha dada. El alumno tiene todo el día del vencimiento
- * para pagar: al día siguiente debe 1 día. Nunca es negativo.
+ * —hasta las 23:59:59 de Argentina— para pagar: al día siguiente debe 1 día.
+ * Nunca es negativo.
  */
 export function lateDaysAt(period: string | Date, dueDay: number, at: Date = new Date()): number {
-  const deadline = dueDateFor(period, dueDay)
-  deadline.setHours(23, 59, 59, 999)
+  const [year, month, day] = dueDayOf(period, dueDay)
+  const deadline = argentinaDate(year, month, day, 23, 59, 59, 999)
   if (at.getTime() <= deadline.getTime()) return 0
   return Math.floor((at.getTime() - deadline.getTime()) / MS_PER_DAY) + 1
 }

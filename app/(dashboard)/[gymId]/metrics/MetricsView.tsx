@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { SkeletonMetrics } from "@/components/ui/Skeleton"
 import { InfoTooltip } from "@/components/ui/InfoTooltip"
+import { currentPeriod, formatMonthYear } from "@/lib/timezone"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -411,18 +412,12 @@ function GroupDetailView({ group: g, onBack }: { group: GroupMetrics; onBack: ()
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-function formatPeriod(period: string) {
-  const [year, month] = period.split("-")
-  const date = new Date(Number(year), Number(month) - 1, 1)
-  return date.toLocaleDateString("es-AR", { month: "long", year: "numeric" })
-}
-
-function toYearMonth(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
-}
+const formatPeriod = formatMonthYear
 
 export default function MetricsView({ gymId }: { gymId: string }) {
-  const period = toYearMonth(new Date())
+  // El mes en curso en Argentina, no el del navegador: si no, el 1° a la mañana
+  // (o el último día a la noche) las métricas salen del mes equivocado.
+  const period = currentPeriod()
   const [activeView, setActiveView] = useState<MetricView>("gimnasio")
   const [healthMetrics, setHealthMetrics] = useState<HealthIndexMetrics | null>(null)
   const [gymMetrics, setGymMetrics] = useState<GymMetrics | null>(null)
