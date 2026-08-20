@@ -818,7 +818,8 @@ Al despagar (o al limpiar el medio), `amount` vuelve a la cuota limpia y el rest
 **Retorna:** `Payment` actualizado.
 
 **Donde se usa:** `PaymentsView.tsx` — modal de cobro (medio de pago, condonar la mora y ajustar el
-monto a cobrar), editar monto/notas.
+monto a cobrar), cancelar un cobro (`status: PENDING`, que devuelve la cuota limpia) y editar
+monto/notas.
 
 ---
 
@@ -832,7 +833,8 @@ monto a cobrar), editar monto/notas.
 
 **Retorna:** 204 No Content.
 
-**Donde se usa:** `PaymentsView.tsx` — eliminar pago y regenerar.
+**Donde se usa:** Ningun lugar de la UI. Cancelar un cobro se hace con `PATCH status: PENDING`, que
+deja la cuota impaga en vez de borrarla; este DELETE borra el registro y queda para el owner.
 
 ---
 

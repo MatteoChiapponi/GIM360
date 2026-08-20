@@ -256,6 +256,31 @@ describe("Un ajuste ya guardado sobrevive a las ediciones que no lo tocan", () =
     })
   })
 
+  it("la recepcionista puede cancelar un cobro y el ajuste se va con él", async () => {
+    seed("payment", [paymentRow(paid)])
+    mockAuth.mockResolvedValue(SESSIONS.receptionist1() as never)
+
+    const res = await patch({ status: "PENDING", paidAt: null })
+
+    expect(res.status).toBe(200)
+    expect(savedFields()).toMatchObject({
+      amount: 10000,
+      paymentMethod: null,
+      manualAdjustment: null,
+      manualAdjustmentReason: null,
+    })
+  })
+
+  it("una cuota ya verificada no se puede cancelar: la caja está cerrada", async () => {
+    seed("payment", [paymentRow({ ...paid, verified: true })])
+    mockAuth.mockResolvedValue(SESSIONS.receptionist1() as never)
+
+    const res = await patch({ status: "PENDING", paidAt: null })
+
+    expect(res.status).toBe(409)
+    expect(mockUpdatePayment).not.toHaveBeenCalled()
+  })
+
   it("despagar limpia el ajuste junto con el resto", async () => {
     seed("payment", [paymentRow(paid)])
 

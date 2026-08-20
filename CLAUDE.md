@@ -186,7 +186,8 @@ User (auth)
 **RECEPTIONIST** — pertenece a un solo gimnasio (`Receptionist.gymId`) y comparte las vistas de
 `/[gymId]`, con la nav recortada a Alumnos / Asistencias / Cuotas (`RECEPTIONIST_SECTIONS` en
 `components/layout/NavLinks.tsx`). Puede hacer CRUD de alumnos (incluidas fichas y apto médico),
-inscribirlos en grupos, generar las cuotas del mes y registrar pagos, y cargar asistencias.
+inscribirlos en grupos, generar las cuotas del mes, registrar pagos y cancelarlos mientras no haya
+cierre de caja de por medio, y cargar asistencias.
 Quedan fuera: cierres de caja, gastos, métricas, grupos, entrenadores y la configuración del gimnasio. `active: false` corta el
 acceso sin borrar el registro; `DELETE` borra el `User` y arrastra al `Receptionist` por cascade.
 

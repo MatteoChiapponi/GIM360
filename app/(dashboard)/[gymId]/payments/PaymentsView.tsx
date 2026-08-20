@@ -389,18 +389,26 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
     }
   }
 
+  /**
+   * Cancela un cobro: la cuota vuelve a Pendiente y se le van la fecha de pago,
+   * el medio, la mora y los ajustes. Va por `PATCH`, no por `DELETE`: no se borra
+   * la cuota, se deshace el cobro — y así también lo puede hacer la recepcionista,
+   * que es la que más cobra y la que más se equivoca al cobrar. Un pago ya
+   * verificado devuelve 409, así que solo se puede cancelar lo que todavía no
+   * entró en un cierre de caja: la ventana que el cierre después revisa.
+   */
   async function handleUnmarkPaid(id: string) {
     setConfirmUnpayId(null)
     setMutationError(null)
     setUpdatingId(id)
     try {
-      const res = await fetch(`/api/payments/${id}?gymId=${gymId}`, { method: "DELETE" })
+      const res = await fetch(`/api/payments/${id}?gymId=${gymId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "PENDING", paidAt: null }),
+      })
       if (res.ok) {
-        // Regenerate so the student reappears as PENDING
-        await fetch("/api/payments", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ gymId, period }),
-        })
+        // Se relee el período: si la cuota está fuera de término, vuelve como
+        // vencida, y eso lo decide el backend al listar.
         await fetchPayments()
       } else {
         const data = await res.json().catch(() => ({}))
@@ -968,7 +976,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
       <ConfirmDialog
         open={confirmUnpayId !== null}
         title="Desmarcar como pagado"
-        message="Esta cuota volverá al estado Pendiente y se borrará la fecha de pago. ¿Querés continuar?"
+        message="Esta cuota volverá al estado Pendiente: se borran la fecha de pago, el medio y los ajustes que se le hayan hecho. ¿Querés continuar?"
         confirmLabel="Desmarcar"
         onConfirm={() => { if (confirmUnpayId) handleUnmarkPaid(confirmUnpayId) }}
         onCancel={() => setConfirmUnpayId(null)}
