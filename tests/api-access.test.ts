@@ -244,6 +244,11 @@ const RECEPTIONIST_ALLOWED: Endpoint[] = [
     call: async (gymId) =>
       (await import("@/app/api/payment-methods/route")).GET(makeRequest(`/api/payment-methods?gymId=${gymId}`)),
   },
+  {
+    name: "GET /api/late-fee",
+    call: async (gymId) =>
+      (await import("@/app/api/late-fee/route")).GET(makeRequest(`/api/late-fee?gymId=${gymId}`)),
+  },
 ]
 
 const RECEPTIONIST_DENIED: Endpoint[] = [
@@ -343,6 +348,24 @@ const RECEPTIONIST_DENIED: Endpoint[] = [
     name: "GET /api/admin/owners",
     ownerAllowed: false,
     call: async () => (await import("@/app/api/admin/owners/route")).GET(makeRequest("/api/admin/owners")),
+  },
+  {
+    name: "PATCH /api/late-fee (configurar el recargo por mora)",
+    call: async (gymId) =>
+      (await import("@/app/api/late-fee/route")).PATCH(
+        makeRequest("/api/late-fee", {
+          method: "PATCH",
+          body: {
+            gymId,
+            enabled: true,
+            graceDays: 5,
+            feeType: "PERCENT",
+            feeValue: 10,
+            frequency: "WEEKLY",
+            maxFeeAmount: null,
+          },
+        }),
+      ),
   },
   {
     name: "PATCH /api/payment-methods (configurar medios de pago)",

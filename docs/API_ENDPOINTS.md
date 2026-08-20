@@ -18,6 +18,7 @@
 - [Schedules](#schedules)
 - [Expenses](#expenses)
 - [Payments](#payments)
+- [Late Fee (recargo por mora)](#late-fee-recargo-por-mora)
 - [Cash Closings (cierres de caja)](#cash-closings-cierres-de-caja)
 - [Metrics](#metrics)
 
@@ -790,11 +791,22 @@ Cada entrada de `schedules`:
 | `paidAt`        | datetime | No |
 | `notes`         | string | No |
 | `amount`        | number | No |
+| `lateFeeWaived` | boolean | No (condona el recargo por mora de esta cuota) |
 
 **Validaciones:**
 - No se puede modificar un pago verificado (cierre de caja ya realizado).
 - Si `status = PAID`, `paymentMethod` es obligatorio.
 - Si `status != PAID`, `paymentMethod` se limpia automaticamente.
+- Cobrar con un medio de pago deshabilitado devuelve 400.
+
+**Logica de montos:** el backend recalcula lo que se cobra y guarda la descomposicion
+`amount = baseAmount + lateFee + methodAdjustment`:
+- `baseAmount` — la cuota limpia.
+- `lateFee` / `lateDays` — recargo por mora segun la regla del gimnasio y los dias de atraso a la
+  fecha de `paidAt`. Queda en 0 si el alumno es `lateFeeExempt` o si se manda `lateFeeWaived`.
+- `methodAdjustment` — recargo o descuento del medio de pago, calculado sobre cuota + mora.
+
+Al despagar (o al limpiar el medio), `amount` vuelve a la cuota limpia y el resto se pone en `null`.
 
 **Retorna:** `Payment` actualizado.
 
@@ -813,6 +825,52 @@ Cada entrada de `schedules`:
 **Retorna:** 204 No Content.
 
 **Donde se usa:** `PaymentsView.tsx` — eliminar pago y regenerar.
+
+---
+
+## Late Fee (recargo por mora)
+
+### `GET /api/late-fee?gymId=xxx`
+
+**Para que sirve:** Leer la regla de recargo por mora del gimnasio.
+
+**Roles:** `OWNER`, `RECEPTIONIST`
+
+**Recibe (query params):** `gymId` (requerido).
+
+**Retorna:** `{ enabled, graceDays, feeType, feeValue, frequency, maxFeeAmount }`. Un gimnasio que
+nunca la configuro devuelve el default: la regla apagada.
+
+**Donde se usa:** `LateFeeSettings.tsx` — formulario de configuracion. `PaymentsView.tsx` —
+vista previa del recargo antes de cobrar.
+
+---
+
+### `PATCH /api/late-fee`
+
+**Para que sirve:** Configurar el recargo por mora del gimnasio.
+
+**Roles:** `OWNER`
+
+**Recibe (body JSON):**
+| Campo          | Tipo    | Requerido |
+|----------------|---------|-----------|
+| `gymId`        | string  | Si |
+| `enabled`      | boolean | Si |
+| `graceDays`    | number  | Si (entero, 0 a 365) |
+| `feeType`      | enum    | Si (`FIXED`, `PERCENT`) |
+| `feeValue`     | number  | Si (pesos si `FIXED`, % si `PERCENT`) |
+| `frequency`    | enum    | Si (`ONCE`, `DAILY`, `WEEKLY`, `MONTHLY`) |
+| `maxFeeAmount` | number \| null | Si (tope del recargo acumulado; `null` = sin tope) |
+
+**Validaciones:**
+- Con `enabled = true`, `feeValue` tiene que ser mayor a 0.
+- Con `feeType = PERCENT`, `feeValue` no puede superar 100.
+- El gimnasio tiene que estar activo.
+
+**Retorna:** la regla guardada.
+
+**Donde se usa:** `LateFeeSettings.tsx` — boton de guardar.
 
 ---
 

@@ -71,7 +71,7 @@ type StudentDetail = {
   id: string; firstName: string; lastName: string
   phone1: string; phone2: string | null; emergencyContact: string | null; emergencyPhone: string | null
   birthDate: string | null; nationalId: string | null
-  joinedAt: string; leftAt: string | null; dueDay: number
+  joinedAt: string; leftAt: string | null; dueDay: number; lateFeeExempt: boolean
   status: StudentStatus
   trialEndsAt: string | null
   groups: EnrolledGroup[]
@@ -110,14 +110,18 @@ type NewForm = {
   fichaFile: File | null; aptoFile: File | null
   isTrial: boolean; trialEndsAt: string
 }
-type EditForm = { firstName: string; lastName: string; dueDay: string; phone1: string; phone2: string }
+type EditForm = {
+  firstName: string; lastName: string; dueDay: string; phone1: string; phone2: string
+  /** Exime al alumno del recargo por mora del gimnasio */
+  lateFeeExempt: boolean
+}
 
 const EMPTY_FORM: NewForm = {
   firstName: "", lastName: "", dueDay: "", phone1: "", phone2: "", groupId: "",
   fichaFile: null, aptoFile: null,
   isTrial: false, trialEndsAt: "",
 }
-const EMPTY_EDIT: EditForm = { firstName: "", lastName: "", dueDay: "", phone1: "", phone2: "" }
+const EMPTY_EDIT: EditForm = { firstName: "", lastName: "", dueDay: "", phone1: "", phone2: "", lateFeeExempt: false }
 
 export default function StudentsView({ gymId }: { gymId: string }) {
   const { data: students, loading, error, refetch } = useFetch<Student[]>(
@@ -293,6 +297,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
       dueDay: String(selectedDetail.dueDay),
       phone1: selectedDetail.phone1,
       phone2: selectedDetail.phone2 ?? "",
+      lateFeeExempt: selectedDetail.lateFeeExempt,
     })
     setShowEditModal(true)
     setEditError(null)
@@ -315,6 +320,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
         dueDay: day,
         phone1: editForm.phone1.trim(),
         phone2: editForm.phone2.trim() || null,
+        lateFeeExempt: editForm.lateFeeExempt,
       }),
     })
     if (res.ok) {
@@ -698,6 +704,9 @@ export default function StudentsView({ gymId }: { gymId: string }) {
                         <div className="rounded-lg border border-[#E5E4E0] bg-[#FAFAF9] px-3 py-2.5">
                           <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#A5A49D]">Día de cobro</p>
                           <p className="mt-1 font-mono text-sm font-semibold text-[#111110]">{selectedDetail.dueDay}</p>
+                          {selectedDetail.lateFeeExempt && (
+                            <p className="mt-1 text-[11px] font-medium text-emerald-700">Exento de mora</p>
+                          )}
                         </div>
                         <div className="rounded-lg border border-[#E5E4E0] bg-[#FAFAF9] px-3 py-2.5">
                           <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#A5A49D]">Fecha de ingreso</p>
@@ -942,6 +951,20 @@ export default function StudentsView({ gymId }: { gymId: string }) {
         <FormField label="Teléfono secundario">
           <Input value={editForm.phone2} onChange={(e) => setEditForm((f) => ({ ...f, phone2: e.target.value }))} placeholder="Ej: 11 8765-4321" />
         </FormField>
+        <label className="flex items-start gap-2 text-sm text-[#68685F] cursor-pointer sm:col-span-2">
+          <input
+            type="checkbox"
+            checked={editForm.lateFeeExempt}
+            onChange={(e) => setEditForm((f) => ({ ...f, lateFeeExempt: e.target.checked }))}
+            className="mt-0.5 h-4 w-4 rounded border-[#E5E4E0] accent-[#111110]"
+          />
+          <span>
+            Exento del recargo por mora
+            <span className="block text-xs text-[#A5A49D]">
+              Sus cuotas vencidas se cobran al monto original, aunque el gimnasio cobre mora.
+            </span>
+          </span>
+        </label>
       </FormModal>
 
       <ConfirmDialog

@@ -104,6 +104,7 @@ User (auth)
  │         │    └── Attendance[]
  │         ├── Payment[]  ── CashClosing[]
  │         ├── PaymentMethodConfig[]  (uno por PaymentMethod; sin fila = habilitado y sin ajuste)
+ │         ├── LateFeeConfig 0:1        (recargo por mora; sin fila = regla apagada)
  │         ├── StudentFile[]
  │         └── FixedExpense[]
  ├── Trainer 1:1  (optional)
@@ -132,6 +133,8 @@ acceso sin borrar el registro; `DELETE` borra el `User` y arrastra al `Reception
 - `PaymentStatus`: `PENDING | PAID | EXPIRED`
 - `PaymentMethod`: `CASH | TRANSFER | CARD`
 - `PaymentAdjustmentType`: `NONE | SURCHARGE | DISCOUNT` — ajuste que cada gimnasio le configura a un medio de pago
+- `LateFeeType`: `FIXED | PERCENT` — si el recargo por mora es un monto en pesos o un % de la cuota
+- `LateFeeFrequency`: `ONCE | DAILY | WEEKLY | MONTHLY` — cada cuánto se vuelve a aplicar mientras siga impaga
 - `StudentFileType`: `FICHA | APTO_MEDICO`
 - `DayOfWeek`: `MONDAY | TUESDAY | WEDNESDAY | THURSDAY | FRIDAY | SATURDAY | SUNDAY`
 
@@ -179,6 +182,45 @@ UI se arma con lo que devuelve la API (nunca con una lista fija), así que el ca
 (`cashTotal`/`transferTotal`/`cardTotal` → tabla hija por medio, mapeadas hoy en `closingBreakdown`
 de `PaymentsView`), y `PAYMENT_METHOD_LABEL` / `PaymentMethodIcon`, que pasarían a salir de la config.
 
+### Recargo por mora
+
+`LateFeeConfig` (`modules/late-fees/`) es la regla de un gimnasio para cobrarle de más a la cuota que
+se paga fuera de término. Una sola fila por gimnasio; sin fila, la regla está apagada — que es como
+venían funcionando todos. Cuatro parámetros la definen:
+
+| Campo | Qué controla |
+|---|---|
+| `graceDays` | Días de tolerancia después del vencimiento antes de que empiece a correr |
+| `feeType` + `feeValue` | Cuánto: un monto fijo (`FIXED`) o un % de la cuota (`PERCENT`) |
+| `frequency` | Si se aplica una sola vez (`ONCE`) o se acumula por día / semana / mes de atraso |
+| `maxFeeAmount` | Tope opcional del recargo acumulado, en pesos |
+
+- **Configuración**: `/[gymId]/settings`, solo owner. `GET /api/late-fee` lo leen owner y
+  recepcionista (necesita previsualizar lo que va a cobrar); `PATCH` es del owner.
+- **Cuándo se calcula**: al cobrar, no al generar la cuota. Un pago PENDING/EXPIRED guarda siempre la
+  cuota limpia en `amount` — el recargo sigue corriendo, así que congelarlo antes sería mentir. La
+  vista lo previsualiza con la misma fórmula (`lib/late-fee.ts`) y el backend lo recalcula y lo
+  congela en `Payment.lateFee` / `lateDays` recién en el `PATCH` que marca el pago.
+- **Contra qué fecha**: contra `paidAt`, no contra hoy. Reeditarle el medio a un pago viejo no le
+  suma atraso que nunca existió.
+- **Orden de las dos reglas**: la mora entra primero, el ajuste del medio de pago después, sobre la
+  deuda ya con la mora incluida. La descomposición guardada es
+  `amount = baseAmount + lateFee + methodAdjustment`, con `baseAmount` = la cuota limpia.
+  Al despagar, `amount` vuelve a `baseAmount` y se limpia todo lo demás.
+- **Dos formas de no cobrarlo**: `Student.lateFeeExempt` exime al alumno de forma permanente (beca,
+  arreglo particular) y `Payment.lateFeeWaived` condona una cuota puntual desde el modal de cobro.
+  Ambas dejan `lateDays` cargado — lo que se perdona es el monto, no el registro del atraso.
+
+**Dónde impacta**:
+
+| Lugar | Efecto |
+|---|---|
+| `generateMonthlyPayments` | Re-sincroniza el `amount` de PENDING/EXPIRED con el precio de los grupos. No lo toca la mora, que nunca se guarda antes de cobrar. |
+| `expireOverduePayments` | Sigue decidiendo PENDING/EXPIRED por el vencimiento; la mora no cambia el estado, solo el monto al cobrar. |
+| `cash-closings` / métricas | La mora entra en `amount`, así que suma como ingreso real igual que un recargo por medio de pago. |
+| `totalPendingRevenue` | Es la cuota sin mora: lo acumulado todavía no se cobró y podría condonarse. |
+| Recordatorio de WhatsApp | Si ya corrió mora, el aviso manda el total de hoy — avisar solo la cuota sería un número que después no coincide con el cobro. |
+
 ### Route groups
 - `app/(auth)/` — public routes (`/login`)
 - `app/(dashboard)/` — protected routes. Entradas por rol: `/dashboard` (owner), `/admin`,
@@ -200,6 +242,7 @@ Lo que sí se mockea: `@/lib/auth` (la sesión), `@/lib/logger` y los servicios 
 | `tests/guards.test.ts` | `requireGymRole` y su fallback por rol |
 | `tests/receptionists.service.test.ts` | Alta transaccional, email duplicado, hash de contraseña, borrado por cascade |
 | `tests/payment-methods.test.ts` | Cálculo del recargo/descuento, cobro con la config del gimnasio, medio deshabilitado, invariante de "al menos uno habilitado" |
+| `tests/late-fee.test.ts` | Días de atraso y fórmula de la mora, orden mora → medio de pago, exención y condonación, congelado contra `paidAt`, validación de la regla |
 
 Al agregar un endpoint que acepte más de un rol, sumalo al catálogo de `api-access.test.ts`: las
 listas `RECEPTIONIST_ALLOWED` / `RECEPTIONIST_DENIED` son la definición ejecutable de los permisos.
@@ -249,6 +292,7 @@ modules/                    ← Business logic, one folder per domain
   groups/
   schedules/
   payment-methods/          ← Config por gimnasio de cada medio de pago
+  late-fees/                ← Regla de recargo por mora del gimnasio
 
 app/api/                    ← HTTP layer only (thin controllers)
   auth/[...nextauth]/       ← NextAuth internals, do not touch

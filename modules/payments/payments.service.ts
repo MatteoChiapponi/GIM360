@@ -8,6 +8,9 @@ type UpdatePaymentData = Omit<UpdatePaymentInput, "paymentMethod"> & {
   baseAmount?: number | null
   /** Ajuste aplicado, firmado (+ recargo / − descuento) */
   methodAdjustment?: number | null
+  /** Recargo por mora congelado al cobrar, y los días de atraso con los que salió */
+  lateFee?: number | null
+  lateDays?: number | null
 }
 
 /** Parses "YYYY-MM" into the first-day-of-month Date (UTC) */
@@ -19,7 +22,7 @@ function parsePeriod(period: string): Date {
 const paymentWithStudent = {
   include: {
     student: {
-      select: { id: true, firstName: true, lastName: true, dueDay: true, phone1: true },
+      select: { id: true, firstName: true, lastName: true, dueDay: true, phone1: true, lateFeeExempt: true },
     },
   },
 } as const
@@ -156,7 +159,7 @@ export async function getPaymentsByStudent(studentId: string) {
   })
 }
 
-/** Updates a payment (status, paidAt, notes, amount, paymentMethod y el ajuste del medio de pago) */
+/** Updates a payment (status, paidAt, notes, amount, paymentMethod, el recargo por mora y el ajuste del medio de pago) */
 export async function updatePayment(id: string, data: UpdatePaymentData) {
   return db.payment.update({
     where: { id },
