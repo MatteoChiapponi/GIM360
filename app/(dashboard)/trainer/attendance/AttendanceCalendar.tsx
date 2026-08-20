@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   DAY_LABELS_SHORT,
   MONTH_NAMES,
@@ -9,14 +9,17 @@ import {
   formatWeekLabel,
   fromDateStr,
   getMonthCalendarDays,
+  getMonthStart,
   getScheduleTimeForDay,
   getWeekDays,
   getWeekEnd,
   getWeekStart,
+  getYearMonth,
   isAfterDay,
   isSameDay,
   toDateStr,
 } from "./calendar-helpers"
+import { addDays, argentinaParts, startOfDay } from "@/lib/timezone"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -85,38 +88,36 @@ function ChevronRight() {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function AttendanceCalendar({ gymId, onSelectRecord, refreshKey, statusMode = "any-taken" }: Props) {
-  const todayRef = useRef<Date>(null!)
-  if (!todayRef.current) {
-    const d = new Date()
-    d.setHours(0, 0, 0, 0)
-    todayRef.current = d
-  }
+  // "Hoy" es la medianoche argentina, no la del navegador: el calendario tiene
+  // que mostrar el mismo día que el gimnasio, se abra desde donde se abra. Se
+  // calcula una sola vez, al montar, para que no se mueva bajo los pies del
+  // usuario mientras navega.
+  const [today] = useState<Date>(startOfDay)
 
   const [viewMode, setViewMode] = useState<"week" | "month">("week")
-  const [anchorDate, setAnchorDate] = useState<Date>(() => getWeekStart(todayRef.current))
+  const [anchorDate, setAnchorDate] = useState<Date>(() => getWeekStart(startOfDay()))
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [rangeRecords, setRangeRecords] = useState<AttendanceRecord[]>([])
   const [loadingRange, setLoadingRange] = useState(false)
 
   // ── Compute visible range ──
   const { rangeFrom, rangeTo } = useMemo(() => {
-    const today = todayRef.current
     let from: Date, to: Date
 
     if (viewMode === "week") {
       from = anchorDate
       to = getWeekEnd(anchorDate)
     } else {
-      const monthDays = getMonthCalendarDays(anchorDate.getFullYear(), anchorDate.getMonth())
+      const monthDays = getMonthCalendarDays(...getYearMonth(anchorDate))
       from = monthDays[0].date
       to = monthDays[monthDays.length - 1].date
     }
 
     // Clamp end to today
-    if (isAfterDay(to, today)) to = new Date(today)
+    if (isAfterDay(to, today)) to = today
 
     return { rangeFrom: from, rangeTo: to }
-  }, [viewMode, anchorDate])
+  }, [viewMode, anchorDate, today])
 
   // ── Fetch records for range ──
   useEffect(() => {
@@ -147,31 +148,22 @@ export default function AttendanceCalendar({ gymId, onSelectRecord, refreshKey, 
   }, [rangeRecords])
 
   // ── Navigation ──
-  const today = todayRef.current
-
   const canGoNext = useMemo(() => {
     if (viewMode === "week") {
       // Can go next if the Monday of next week is on or before today
-      const nextWeekStart = new Date(anchorDate)
-      nextWeekStart.setDate(anchorDate.getDate() + 7)
+      const nextWeekStart = addDays(anchorDate, 7)
       return !isAfterDay(nextWeekStart, today)
     } else {
       // Can go next if the 1st of next month is on or before today
-      const nextMonthStart = new Date(anchorDate.getFullYear(), anchorDate.getMonth() + 1, 1)
-      return !isAfterDay(nextMonthStart, today)
+      return !isAfterDay(getMonthStart(anchorDate, 1), today)
     }
   }, [viewMode, anchorDate, today])
 
   function goBack() {
     setSelectedDate(null)
     setAnchorDate((prev) => {
-      if (viewMode === "week") {
-        const d = new Date(prev)
-        d.setDate(prev.getDate() - 7)
-        return d
-      } else {
-        return new Date(prev.getFullYear(), prev.getMonth() - 1, 1)
-      }
+      if (viewMode === "week") return addDays(prev, -7)
+      return getMonthStart(prev, -1)
     })
   }
 
@@ -179,13 +171,8 @@ export default function AttendanceCalendar({ gymId, onSelectRecord, refreshKey, 
     if (!canGoNext) return
     setSelectedDate(null)
     setAnchorDate((prev) => {
-      if (viewMode === "week") {
-        const d = new Date(prev)
-        d.setDate(prev.getDate() + 7)
-        return d
-      } else {
-        return new Date(prev.getFullYear(), prev.getMonth() + 1, 1)
-      }
+      if (viewMode === "week") return addDays(prev, 7)
+      return getMonthStart(prev, 1)
     })
   }
 
@@ -194,7 +181,7 @@ export default function AttendanceCalendar({ gymId, onSelectRecord, refreshKey, 
     if (viewMode === "week") {
       setAnchorDate(getWeekStart(today))
     } else {
-      setAnchorDate(new Date(today.getFullYear(), today.getMonth(), 1))
+      setAnchorDate(getMonthStart(today))
     }
   }
 
@@ -204,7 +191,7 @@ export default function AttendanceCalendar({ gymId, onSelectRecord, refreshKey, 
     if (mode === "week") {
       setAnchorDate(getWeekStart(anchorDate))
     } else {
-      setAnchorDate(new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1))
+      setAnchorDate(getMonthStart(anchorDate))
     }
   }
 
@@ -215,10 +202,10 @@ export default function AttendanceCalendar({ gymId, onSelectRecord, refreshKey, 
   }, [selectedDate, recordsByDate])
 
   // ── Period label ──
+  const [anchorYear, anchorMonth] = getYearMonth(anchorDate)
+
   const periodLabel =
-    viewMode === "week"
-      ? formatWeekLabel(anchorDate)
-      : formatMonthLabel(anchorDate.getFullYear(), anchorDate.getMonth())
+    viewMode === "week" ? formatWeekLabel(anchorDate) : formatMonthLabel(anchorYear, anchorMonth)
 
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -314,8 +301,8 @@ export default function AttendanceCalendar({ gymId, onSelectRecord, refreshKey, 
           />
         ) : (
           <MonthGrid
-            year={anchorDate.getFullYear()}
-            month={anchorDate.getMonth()}
+            year={anchorYear}
+            month={anchorMonth}
             today={today}
             selectedDate={selectedDate}
             recordsByDate={recordsByDate}
@@ -437,7 +424,7 @@ function WeekStrip({
                 isSelected ? "text-white" : isToday ? "text-emerald-600" : "text-[#111110]",
               ].join(" ")}
             >
-              {date.getDate()}
+              {argentinaParts(date).day}
             </span>
           </button>
         )
@@ -504,7 +491,7 @@ function MonthGrid({
                 isSelected ? "text-white" : isToday ? "text-emerald-600" : "text-[#111110]",
               ].join(" ")}
             >
-              {date.getDate()}
+              {argentinaParts(date).day}
             </span>
           </button>
         )

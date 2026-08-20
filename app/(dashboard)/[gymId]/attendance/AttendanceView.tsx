@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import AttendanceCalendar from "@/app/(dashboard)/trainer/attendance/AttendanceCalendar"
+import { argentinaParts, todayISO, weekdayName } from "@/lib/timezone"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -53,13 +54,16 @@ interface Props {
 
 // ─── Date helpers ──────────────────────────────────────────────────────────────
 
+// "Hoy" es siempre el día en Argentina, no el de la máquina que abre la
+// pantalla: si no, un navegador con otra zona pide las asistencias del día
+// equivocado.
+
 function todayDateStr(): string {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
+  return todayISO()
 }
 
 function todayDayOfWeek(): string {
-  return ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"][new Date().getDay()]
+  return weekdayName()
 }
 
 function formatDateDisplay(): string {
@@ -73,9 +77,8 @@ function formatDateDisplay(): string {
     SATURDAY: "Sáb",
   }
   const MONTH_SHORT = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
-  const now = new Date()
-  const day = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"][now.getDay()]
-  return `${DAY_SHORT[day]} ${now.getDate()} ${MONTH_SHORT[now.getMonth()]}`
+  const { month, day } = argentinaParts()
+  return `${DAY_SHORT[weekdayName()]} ${day} ${MONTH_SHORT[month - 1]}`
 }
 
 function getScheduleTimeForToday(schedules: ScheduleInfo[]): string {

@@ -83,6 +83,8 @@ if (session.user.role === "TRAINER") {
 | `lib/money.ts` | `round2()` y `formatMoney()` — el redondeo de todo monto que se guarda, compartido por servicios y vistas |
 | `lib/payment-methods.ts` | Parte client-safe de los medios de pago: valores, etiquetas y la fórmula del ajuste |
 | `lib/late-fee.ts` | Parte client-safe de la mora: vencimiento, días de atraso y la fórmula del recargo |
+| `lib/timezone.ts` | **La zona horaria del proyecto: Argentina.** Todo cálculo de fecha pasa por acá — ver más abajo |
+| `instrumentation.ts` | Arranque del server: le clava `process.env.TZ` en `America/Argentina/Buenos_Aires` |
 | `proxy.ts` | Route guard — sin sesión → `/login`; con sesión, manda cada rol a su área |
 | `lib/guards.ts` | `requireGymRole(gymId, roles)` — guard de rol para páginas de `/[gymId]` |
 | `lib/with-auth.ts` | `withAuth(roles, handler)` / `withAuthParams` — auth + rol + logging del request |
@@ -90,6 +92,78 @@ if (session.user.role === "TRAINER") {
 | `prisma.config.ts` | Loads `.env.local` (override) then `.env`; passes `DATABASE_URL` to Prisma CLI |
 | `types/next-auth.d.ts` | Extends `Session` type to include `user.id` and `user.role` |
 | `scripts/seed.ts` | Creates test Owner user — runs standalone with `npx tsx` |
+
+### Zona horaria — Argentina, siempre
+
+El servidor corre en Estados Unidos y los gimnasios están en Argentina. Un `Date` es un instante
+absoluto y eso no es problema; el problema aparece en cuanto se pregunta **qué día** es:
+`getDate()`, `getMonth()`, `getDay()` y `new Date(y, m, d)` contestan en la zona del runtime, que
+en el backend es la de Estados Unidos y en el frontend la de la máquina del usuario.
+
+**Regla**: no se usan los accesores locales de `Date`. Todo pasa por `lib/timezone`.
+
+La zona se fija en varios lugares que se complementan:
+
+| Dónde | Qué cubre |
+|---|---|
+| `instrumentation.ts` | Setea `process.env.TZ` al arrancar el server. Cubre todo el backend en producción |
+| `next.config.ts` | Lo mismo, para el proceso del build y el server de dev |
+| `lib/timezone.ts` | Cálculo explícito, sin depender del runtime. Es lo único que sirve en el navegador |
+| `vitest.config.mts` | Los tests corren en la zona de Argentina, igual que producción |
+
+`process.env.TZ` sola no alcanza: el código "use client" corre en la máquina del usuario, donde esa
+variable no existe. Por eso los helpers de `lib/timezone` no leen la hora local del runtime.
+
+```ts
+import {
+  todayISO,        // "2026-08-20" — el día de hoy en Argentina
+  currentPeriod,   // "2026-08"    — el mes en curso en Argentina
+  toISODate,       // Date → "YYYY-MM-DD" argentino
+  fromISODate,     // "YYYY-MM-DD" → medianoche argentina
+  toPeriod,        // Date → "YYYY-MM" argentino
+  argentinaDate,   // (2026, 8, 20) → el instante de esa medianoche argentina
+  argentinaParts,  // Date → { year, month, day, hour, minute, second, weekday }
+  startOfDay, endOfDay, addDays, daysInMonth, isSameDay,
+  weekday, weekdayName,          // 0 = domingo / "THURSDAY"
+  formatDate, formatDateTime, formatTime, formatMonthYear,
+} from "@/lib/timezone"
+```
+
+Equivalencias, para no volver a escribir el bug:
+
+| En vez de | Va |
+|---|---|
+| `new Date(y, m - 1, d)` | `argentinaDate(y, m, d)` — `m` de 1 a 12 |
+| `d.getFullYear()` / `getMonth()` / `getDate()` | `argentinaParts(d)` |
+| `d.getDay()` | `weekday(d)` / `weekdayName(d)` |
+| `d.toLocaleDateString("es-AR")` | `formatDate(d)` |
+| `` `${y}-${m}` `` armado a mano | `toPeriod(d)` / `currentPeriod()` |
+| `new Date(inputDate).toISOString()` (input `type="date"`) | `fromISODate(inputDate).toISOString()` |
+
+Lo que **sí** puede seguir usando `Date` pelado: `new Date()` y `Date.now()` para marcar un
+instante (`paidAt`, duración de un request, nombre de archivo), y `new Date(isoString)` para
+parsear un ISO completo. Todo eso es absoluto y no depende de la zona.
+
+Dos convenciones de la DB que ya existían y no cambian:
+- `Payment.period` se guarda como el primer día del mes a medianoche **UTC** (`Date.UTC`).
+- `Attendance.date` se guarda como día calendario a medianoche **UTC**. El "hoy" que se manda
+  desde la UI sale de `todayISO()`, así que es el día argentino.
+
+**Las columnas que guardan un día, no un instante**, sí van a medianoche **argentina** (03:00 UTC):
+`Trainer.startedAt`, `Student.birthDate`, `Student.trialEndsAt`, `Schedule.startDate` y
+`Schedule.endDate`. Venían a medianoche UTC porque se escribían con
+`new Date("2026-08-20").toISOString()`, que JavaScript parsea como UTC, y por eso se mostraban un
+día antes. La migración `20260820140000_shift_date_only_columns_to_argentina` corrigió las filas
+que ya estaban; para las nuevas, el camino es `fromISODate(inputDate)`.
+
+La migración usa `AT TIME ZONE` de Postgres y `argentinaDate()` resuelve el offset con Intl: los dos
+coinciden día por día entre 1970 y 2035, incluidos los cambios de hora que Argentina tuvo hasta
+2009. Hay tres días —15/10/1989, 21/10/1990 y 20/10/1991— en los que la medianoche **no existió**
+porque el reloj saltó de las 23:59 a la 01:00; `argentinaDate` los resuelve hacia adelante, que es
+lo mismo que hace Postgres. `tests/timezone.test.ts` lo verifica sobre los 24.000 días del rango.
+
+`tests/timezone.test.ts` corre los helpers con `process.env.TZ` en cuatro zonas distintas y exige
+el mismo resultado en todas: es la red que impide que vuelva a colarse un cálculo con hora local.
 
 ### Data model
 ```
@@ -249,6 +323,7 @@ Lo que sí se mockea: `@/lib/auth` (la sesión), `@/lib/logger` y los servicios 
 | `tests/role-routing.test.ts` | Ruteo por rol del proxy + invariante de que ningún redirect encadena otro |
 | `tests/guards.test.ts` | `requireGymRole` y su fallback por rol |
 | `tests/receptionists.service.test.ts` | Alta transaccional, email duplicado, hash de contraseña, borrado por cascade |
+| `tests/timezone.test.ts` | Los helpers de fecha, corridos en cuatro zonas de runtime: el resultado no puede cambiar |
 | `tests/payment-methods.test.ts` | Cálculo del recargo/descuento, cobro con la config del gimnasio, medio deshabilitado, invariante de "al menos uno habilitado" |
 | `tests/late-fee.test.ts` | Días de atraso y fórmula de la mora, orden mora → medio de pago, exención y condonación, congelado contra `paidAt`, validación de la regla |
 
@@ -287,6 +362,7 @@ lib/                        ← Infrastructure / config (no business logic)
   auth.ts                   ← NextAuth config
   db.ts                     ← Prisma singleton
   utils.ts                  ← cn() helper
+  timezone.ts               ← Zona horaria del proyecto (Argentina) — todo cálculo de fecha
 
 modules/                    ← Business logic, one folder per domain
   belongs/

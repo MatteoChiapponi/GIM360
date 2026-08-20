@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import AttendanceCalendar from "./AttendanceCalendar"
+import { argentinaParts, todayISO, weekdayName } from "@/lib/timezone"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,14 +56,14 @@ type TrainerProfile = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// "Hoy" es siempre el día en Argentina, no el de la máquina del entrenador.
+
 function todayDateStr(): string {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
+  return todayISO()
 }
 
 function todayDayOfWeek(): string {
-  const day = new Date().getDay()
-  return ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"][day]
+  return weekdayName()
 }
 
 function formatDateDisplay(): string {
@@ -76,9 +77,8 @@ function formatDateDisplay(): string {
     SATURDAY: "Sáb",
   }
   const MONTH_SHORT = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
-  const now = new Date()
-  const day = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"][now.getDay()]
-  return `${DAY_SHORT[day]} ${now.getDate()} ${MONTH_SHORT[now.getMonth()]}`
+  const { month, day } = argentinaParts()
+  return `${DAY_SHORT[weekdayName()]} ${day} ${MONTH_SHORT[month - 1]}`
 }
 
 function getScheduleTimeForToday(schedules: ScheduleInfo[]): string {
