@@ -276,6 +276,11 @@ model Payment {
   lateFee          Decimal?    @db.Decimal(10, 2)
   lateDays         Int?
   lateFeeWaived    Boolean     @default(false)
+  // Diferencia que puso a mano quien cobró: un redondeo, unos pesos de menos,
+  // una diferencia acordada. Firmada (+ cobró de más / − cobró de menos), con
+  // el motivo opcional que se dejó anotado.
+  manualAdjustment       Decimal? @db.Decimal(10, 2)
+  manualAdjustmentReason String?
   paidAt        DateTime?
   verified      Boolean        @default(false)
   cashClosingId String?
@@ -359,6 +364,10 @@ model CashClosing {
   transferTotal      Decimal  @db.Decimal(10, 2) @default(0)
   cardCount          Int      @default(0)
   cardTotal          Decimal  @db.Decimal(10, 2) @default(0)
+  // Cuánto de lo cobrado salió de ajustes puestos a mano al cobrar, para que el
+  // cierre muestre la diferencia contra lo que decían las cuotas.
+  adjustmentsCount   Int      @default(0)
+  adjustmentsTotal   Decimal  @db.Decimal(10, 2) @default(0)
   notes              String?
   createdAt          DateTime @default(now())
 

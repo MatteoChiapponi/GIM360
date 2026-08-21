@@ -19,7 +19,7 @@ import {
   PAYMENT_METHOD_LABEL,
   type PaymentMethodValue as PaymentMethod,
 } from "@/lib/payment-methods"
-import { formatMoney } from "@/lib/money"
+import { signedMoney } from "@/lib/money"
 import { formatDate, formatMonthYear, fromISODate } from "@/lib/timezone"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -36,6 +36,9 @@ type StudentPayment = {
   paymentMethod: PaymentMethod | null
   /** Ajuste del medio de pago ya aplicado al monto, firmado (+ recargo / − descuento) */
   methodAdjustment: string | null
+  /** Diferencia que puso a mano quien cobró, firmada (+ de más / − de menos) */
+  manualAdjustment: string | null
+  manualAdjustmentReason: string | null
   paidAt: string | null
   verified: boolean
 }
@@ -819,6 +822,7 @@ export default function StudentsView({ gymId }: { gymId: string }) {
                             PAID: "Pagado", PENDING: "Pendiente", EXPIRED: "Vencido",
                           }
                           const adjustment = p.methodAdjustment ? Number(p.methodAdjustment) : 0
+                          const manual = p.manualAdjustment ? Number(p.manualAdjustment) : 0
                           return (
                             <div
                               key={p.id}
@@ -828,10 +832,16 @@ export default function StudentsView({ gymId }: { gymId: string }) {
                                 <p className="font-medium text-[#111110] capitalize">{periodLabel}</p>
                                 <p className="text-xs text-[#A5A49D]">
                                   {p.paymentMethod ? PAYMENT_METHOD_LABEL[p.paymentMethod] : "—"}
-                                  {adjustment !== 0 && ` ${adjustment > 0 ? "+" : "−"}${formatMoney(Math.abs(adjustment))}`}
+                                  {adjustment !== 0 && ` ${signedMoney(adjustment)}`}
                                   {p.paidAt ? ` · ${formatDate(p.paidAt)}` : ""}
                                   {p.verified ? " · ✓" : ""}
                                 </p>
+                                {manual !== 0 && (
+                                  <p className={`text-xs font-medium ${manual > 0 ? "text-amber-700" : "text-emerald-700"}`}>
+                                    {signedMoney(manual)} de ajuste
+                                    {p.manualAdjustmentReason ? ` — ${p.manualAdjustmentReason}` : ""}
+                                  </p>
+                                )}
                               </div>
                               <div className="text-right shrink-0">
                                 <p className="font-mono font-semibold text-[#111110]">${Number(p.amount).toLocaleString("es-AR")}</p>

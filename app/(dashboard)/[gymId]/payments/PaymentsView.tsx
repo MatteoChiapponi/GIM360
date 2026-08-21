@@ -9,17 +9,14 @@ import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
 import { Button } from "@/components/ui/Button"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
-import { PaymentMethodIcon } from "@/components/ui/PaymentMethodIcon"
 import {
   PAYMENT_METHOD_VALUES,
   PAYMENT_METHOD_LABEL as METHOD_LABEL,
-  adjustedAmount,
-  adjustmentLabel,
   defaultPaymentMethodConfig,
   type PaymentMethodConfig,
   type PaymentMethodValue as PaymentMethod,
 } from "@/lib/payment-methods"
-import { formatMoney } from "@/lib/money"
+import { formatMoney, signedMoney } from "@/lib/money"
 import {
   DEFAULT_LATE_FEE_CONFIG,
   computeLateFee,
@@ -29,28 +26,9 @@ import {
   type LateFeeConfig,
 } from "@/lib/late-fee"
 import { currentPeriod, formatDate, formatMonthYear, toPeriod } from "@/lib/timezone"
+import { PayPaymentModal } from "./PayPaymentModal"
 
-type PaymentStatus = "PENDING" | "PAID" | "EXPIRED"
-
-type Payment = {
-  id: string
-  amount: string
-  status: PaymentStatus
-  paidAt: string | null
-  paymentMethod: PaymentMethod | null
-  /** Monto de la cuota antes del ajuste del medio de pago (null si todavía no se cobró) */
-  baseAmount: string | null
-  /** Ajuste aplicado por el medio de pago, firmado (+ recargo / − descuento) */
-  methodAdjustment: string | null
-  /** Recargo por mora congelado al cobrar (null mientras la cuota siga impaga) */
-  lateFee: string | null
-  lateDays: number | null
-  /** El recargo se condonó a mano para esta cuota */
-  lateFeeWaived: boolean
-  verified: boolean
-  cashClosingId: string | null
-  student: { id: string; firstName: string; lastName: string; dueDay: number; phone1: string; lateFeeExempt: boolean }
-}
+import type { Payment, PaymentStatus } from "./types"
 
 type ClosingReport = {
   totalCollected: string
@@ -61,6 +39,8 @@ type ClosingReport = {
   transferTotal: string
   cardCount: number
   cardTotal: string
+  adjustmentsCount: number
+  adjustmentsTotal: string
   fromDate: string
   toDate: string
 }
@@ -82,9 +62,14 @@ function closingBreakdown(report: ClosingReport): { method: PaymentMethod; count
   ]
 }
 
-/** Ajuste ya aplicado a un pago cobrado, para mostrarlo junto al método. */
+/** Ajuste del medio de pago ya aplicado a un pago cobrado, para mostrarlo junto al método. */
 function paidAdjustment(p: Payment): number {
   return p.methodAdjustment ? Number(p.methodAdjustment) : 0
+}
+
+/** Diferencia que se puso a mano al cobrar: redondeo, unos pesos de menos. */
+function manualAdjustment(p: Payment): number {
+  return p.manualAdjustment ? Number(p.manualAdjustment) : 0
 }
 
 const toYearMonth = toPeriod
@@ -156,24 +141,15 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
   const [sortKey, setSortKey] = useState<SortKey>("status")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
 
-  // Payment method modal state
+  // Cuota que se está cobrando. Todo lo que se decide en el modal (medio, mora y
+  // monto) vive adentro del modal, que se monta de cero por cada cobro.
   const [payMethodForId, setPayMethodForId] = useState<string | null>(null)
   const payMethodPayment = payMethodForId ? payments.find((p) => p.id === payMethodForId) : null
-  // Condonar el recargo por mora de esta cuota puntual, al momento de cobrarla
-  const [waiveLateFee, setWaiveLateFee] = useState(false)
-
-  /** Abre el modal de cobro reflejando la condonación que ya tenga el pago, para
-   *  que la vista previa y lo que después cobra el backend coincidan. */
-  function openPayModal(p: Payment) {
-    setWaiveLateFee(p.lateFeeWaived)
-    setPayMethodForId(p.id)
-  }
 
   // Config de medios de pago del gimnasio (habilitados + recargo/descuento)
   const [methodConfigs, setMethodConfigs] = useState<PaymentMethodConfig[]>(
     PAYMENT_METHOD_VALUES.map(defaultPaymentMethodConfig),
   )
-  const enabledMethods = methodConfigs.filter((c) => c.enabled)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -216,8 +192,6 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
   // En el modal se muestra el recargo aunque esté condonado, para que el tilde de
   // "no cobrarlo" sea visible y se pueda volver atrás.
   const payMethodLateFee = payMethodPayment ? accruedLateFee(payMethodPayment) : 0
-  const payMethodChargeable =
-    (payMethodPayment ? Number(payMethodPayment.amount) : 0) + (waiveLateFee ? 0 : payMethodLateFee)
 
   // Unmark confirmation
   const [confirmUnpayId, setConfirmUnpayId] = useState<string | null>(null)
@@ -289,14 +263,33 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
     return () => controller.abort()
   }, [fetchPayments])
 
-  async function handleMarkPaid(id: string, method: PaymentMethod, lateFeeWaived: boolean) {
+  /**
+   * Cobra la cuota. `charged` es el monto que se cobró de verdad y solo viaja si
+   * alguien lo tocó a mano: mandarlo siempre convertiría en "ajuste manual"
+   * cualquier diferencia con la cuenta del backend (la mora corre por días, y
+   * entre que se abre el modal y se confirma puede haber cambiado).
+   */
+  async function handleMarkPaid(
+    id: string,
+    method: PaymentMethod,
+    lateFeeWaived: boolean,
+    charged: number | null,
+    reason: string,
+  ) {
     setPayMethodForId(null)
     setMutationError(null)
     setUpdatingId(id)
     try {
       const res = await fetch(`/api/payments/${id}?gymId=${gymId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "PAID", paidAt: new Date().toISOString(), paymentMethod: method, lateFeeWaived }),
+        body: JSON.stringify({
+          status: "PAID",
+          paidAt: new Date().toISOString(),
+          paymentMethod: method,
+          lateFeeWaived,
+          chargedAmount: charged,
+          manualAdjustmentReason: charged === null ? null : (reason.trim() || null),
+        }),
       })
       if (res.ok) {
         const updated = await res.json()
@@ -312,18 +305,26 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
     }
   }
 
+  /**
+   * Cancela un cobro: la cuota vuelve a Pendiente y se le van la fecha de pago,
+   * el medio, la mora y los ajustes. Va por `PATCH`, no por `DELETE`: no se borra
+   * la cuota, se deshace el cobro — y así también lo puede hacer la recepcionista,
+   * que es la que más cobra y la que más se equivoca al cobrar. Un pago ya
+   * verificado devuelve 409, así que solo se puede cancelar lo que todavía no
+   * entró en un cierre de caja: la ventana que el cierre después revisa.
+   */
   async function handleUnmarkPaid(id: string) {
     setConfirmUnpayId(null)
     setMutationError(null)
     setUpdatingId(id)
     try {
-      const res = await fetch(`/api/payments/${id}?gymId=${gymId}`, { method: "DELETE" })
+      const res = await fetch(`/api/payments/${id}?gymId=${gymId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "PENDING", paidAt: null }),
+      })
       if (res.ok) {
-        // Regenerate so the student reappears as PENDING
-        await fetch("/api/payments", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ gymId, period }),
-        })
+        // Se relee el período: si la cuota está fuera de término, vuelve como
+        // vencida, y eso lo decide el backend al listar.
         await fetchPayments()
       } else {
         const data = await res.json().catch(() => ({}))
@@ -386,6 +387,8 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
           transferTotal: data.transferTotal,
           cardCount: data.cardCount,
           cardTotal: data.cardTotal,
+          adjustmentsCount: data.adjustmentsCount,
+          adjustmentsTotal: data.adjustmentsTotal,
           fromDate: data.fromDate,
           toDate: data.toDate,
         })
@@ -438,20 +441,6 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
 
   const unverifiedPaid = payments.filter((p) => !p.verified && p.status === "PAID")
   const hasUnverifiedPaid = unverifiedPaid.length > 0
-  const unverifiedCollected = unverifiedPaid.reduce((sum, p) => sum + Number(p.amount), 0)
-
-  // Build closing confirmation breakdown by method
-  const unverifiedByMethod = unverifiedPaid.reduce(
-    (acc, p) => {
-      const m = p.paymentMethod
-      if (m) {
-        acc[m] = { count: (acc[m]?.count ?? 0) + 1, total: (acc[m]?.total ?? 0) + Number(p.amount) }
-      }
-      return acc
-    },
-    {} as Record<PaymentMethod, { count: number; total: number }>,
-  )
-
   const includedInClosing = unverifiedPaid.filter((p) => !excludedPaymentIds.has(p.id))
   const includedCollected = includedInClosing.reduce((sum, p) => sum + Number(p.amount), 0)
   const paymentListFiltered = unverifiedPaid.filter((p) =>
@@ -662,6 +651,14 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
                 </span>
               ))}
           </div>
+          {closingReport.adjustmentsCount > 0 && (
+            <p className="text-xs text-emerald-600">
+              Incluye{" "}
+              <span className="font-mono font-semibold">{signedMoney(Number(closingReport.adjustmentsTotal))}</span>{" "}
+              de ajustes hechos a mano al cobrar ({closingReport.adjustmentsCount} cuota
+              {closingReport.adjustmentsCount !== 1 ? "s" : ""})
+            </p>
+          )}
         </div>
       )}
 
@@ -791,6 +788,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
             render: (p) => {
               if (!p.paymentMethod) return <span className="text-sm text-[#68685F]">—</span>
               const adjustment = paidAdjustment(p)
+              const manual = manualAdjustment(p)
               const fee = p.lateFee ? Number(p.lateFee) : 0
               return (
                 <div className="flex flex-col">
@@ -798,13 +796,21 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
                     {METHOD_LABEL[p.paymentMethod]}
                     {adjustment !== 0 && (
                       <span className={`ml-1 text-xs font-medium ${adjustment > 0 ? "text-amber-700" : "text-emerald-700"}`}>
-                        {adjustment > 0 ? "+" : "−"}{formatMoney(Math.abs(adjustment))}
+                        {signedMoney(adjustment)}
                       </span>
                     )}
                   </span>
                   {fee > 0 && (
                     <span className="text-[11px] font-medium text-amber-700">
                       + {formatMoney(fee)} de mora{p.lateDays ? ` (${daysLabel(p.lateDays)})` : ""}
+                    </span>
+                  )}
+                  {manual !== 0 && (
+                    <span
+                      className={`text-[11px] font-medium ${manual > 0 ? "text-amber-700" : "text-emerald-700"}`}
+                      title={p.manualAdjustmentReason ?? "Ajuste manual al cobrar"}
+                    >
+                      {signedMoney(manual)} de ajuste{p.manualAdjustmentReason ? ` — ${p.manualAdjustmentReason}` : ""}
                     </span>
                   )}
                 </div>
@@ -850,7 +856,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
                   )}
                   <Button
                     variant="link"
-                    onClick={() => openPayModal(p)}
+                    onClick={() => setPayMethodForId(p.id)}
                     disabled={busy}
                     className="disabled:opacity-40"
                   >
@@ -872,7 +878,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
       <ConfirmDialog
         open={confirmUnpayId !== null}
         title="Desmarcar como pagado"
-        message="Esta cuota volverá al estado Pendiente y se borrará la fecha de pago. ¿Querés continuar?"
+        message="Esta cuota volverá al estado Pendiente: se borran la fecha de pago, el medio y los ajustes que se le hayan hecho. ¿Querés continuar?"
         confirmLabel="Desmarcar"
         onConfirm={() => { if (confirmUnpayId) handleUnmarkPaid(confirmUnpayId) }}
         onCancel={() => setConfirmUnpayId(null)}
@@ -934,79 +940,21 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
         onCancel={() => setShowExclusionConfirm(false)}
       />
 
-      {/* Modal: seleccionar método de pago */}
-      {payMethodForId !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" />
-          <div className="relative w-full max-w-sm rounded-2xl border border-[#E5E4E0] bg-white px-6 py-6 shadow-xl space-y-5">
-            <div className="space-y-1.5">
-              <p className="text-[15px] font-semibold text-[#111110]">Registrar pago</p>
-              {payMethodPayment && (
-                <p className="text-sm text-[#68685F]">
-                  {payMethodPayment.student.firstName} {payMethodPayment.student.lastName} — <span className="font-mono font-semibold">{formatMoney(Number(payMethodPayment.amount))}</span>
-                </p>
-              )}
-              <p className="text-sm text-[#A5A49D]">Seleccioná el método de pago:</p>
-            </div>
-
-            {/* La mora se suma a la cuota antes del ajuste del medio; el backend la
-                recalcula al guardar, así que esto es lo que se va a cobrar. */}
-            {payMethodPayment && payMethodLateFee > 0 && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-2">
-                <p className="text-sm text-amber-900">
-                  Recargo por mora:{" "}
-                  <span className="font-mono font-semibold">{formatMoney(payMethodLateFee)}</span>{" "}
-                  <span className="text-amber-700">
-                    ({daysLabel(lateDaysAt(period, payMethodPayment.student.dueDay))} de atraso)
-                  </span>
-                </p>
-                <label className="flex items-center gap-2 text-sm text-amber-900 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={waiveLateFee}
-                    onChange={(e) => setWaiveLateFee(e.target.checked)}
-                    className="h-4 w-4 rounded border-amber-300 accent-[#111110]"
-                  />
-                  No cobrar el recargo esta vez
-                </label>
-              </div>
-            )}
-
-            <div className={`grid gap-3 ${enabledMethods.length === 1 ? "grid-cols-1" : enabledMethods.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
-              {enabledMethods.map((config) => {
-                const base = payMethodChargeable
-                const total = adjustedAmount(base, config)
-                const badge = adjustmentLabel(config)
-                const isDiscount = config.adjustmentType === "DISCOUNT"
-
-                return (
-                  <button
-                    key={config.method}
-                    onClick={() => handleMarkPaid(payMethodForId, config.method, waiveLateFee)}
-                    disabled={updatingId === payMethodForId}
-                    className="flex flex-col items-center gap-2 rounded-xl border border-[#E5E4E0] bg-white px-3 py-4 text-sm font-medium text-[#68685F] hover:border-[#111110] hover:text-[#111110] hover:bg-[#FAFAF9] transition-colors disabled:opacity-40 cursor-pointer"
-                  >
-                    <PaymentMethodIcon method={config.method} />
-                    <span className="text-center leading-tight">{METHOD_LABEL[config.method]}</span>
-                    {badge && (
-                      <span className={`text-[10px] font-semibold ${isDiscount ? "text-emerald-700" : "text-amber-700"}`}>
-                        {badge}
-                      </span>
-                    )}
-                    {(badge || total !== Number(payMethodPayment?.amount ?? 0)) && (
-                      <span className="font-mono text-xs font-semibold text-[#111110]">{formatMoney(total)}</span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-            <div className="flex justify-end pt-1">
-              <Button variant="secondary" onClick={() => setPayMethodForId(null)}>
-                Cancelar
-              </Button>
-            </div>
-          </div>
-        </div>
+      {payMethodPayment && (
+        <PayPaymentModal
+          // Un modal por cuota: al cambiar de cobro se monta de cero y no puede
+          // quedar el redondeo de un alumno colgado en el del siguiente.
+          key={payMethodPayment.id}
+          payment={payMethodPayment}
+          period={period}
+          methodConfigs={methodConfigs}
+          lateFee={payMethodLateFee}
+          busy={updatingId === payMethodPayment.id}
+          onCancel={() => setPayMethodForId(null)}
+          onConfirm={({ method, lateFeeWaived, chargedAmount, reason }) =>
+            handleMarkPaid(payMethodPayment.id, method, lateFeeWaived, chargedAmount, reason)
+          }
+        />
       )}
 
     </div>

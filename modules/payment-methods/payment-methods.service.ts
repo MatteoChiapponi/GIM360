@@ -1,6 +1,6 @@
 import { db } from "@/lib/db"
 import { PaymentAdjustmentType, type PaymentMethod } from "@/app/generated/prisma/client"
-import { adjustedAmount, methodAdjustment, type AdjustmentType, type PaymentMethodValue } from "@/lib/payment-methods"
+import type { AdjustmentType, PaymentMethodValue } from "@/lib/payment-methods"
 import { PAYMENT_METHODS, type PaymentMethodConfigInput } from "./payment-methods.schema"
 
 // `lib/payment-methods` no puede importar el cliente de Prisma (lo consumen
@@ -94,20 +94,4 @@ export async function updatePaymentMethodConfigs(
   )
 
   return getPaymentMethodConfigs(gymId)
-}
-
-/**
- * Aplica el recargo o descuento del medio de pago sobre el monto de la cuota.
- * `adjustment` va firmado: positivo si es recargo, negativo si es descuento.
- * La fórmula vive en `lib/payment-methods` para que el backend y la vista
- * previa del cliente no puedan calcular cosas distintas.
- */
-export function applyMethodAdjustment(
-  baseAmount: number,
-  config: Pick<PaymentMethodConfig, "adjustmentType" | "adjustmentPercent">,
-): { amount: number; adjustment: number } {
-  return {
-    amount: adjustedAmount(baseAmount, config),
-    adjustment: methodAdjustment(baseAmount, config),
-  }
 }

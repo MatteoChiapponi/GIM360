@@ -4,8 +4,8 @@
  * Vive en `lib/` y no importa el cliente de Prisma a propósito, porque de acá
  * lee cualquier componente "use client" (las vistas nunca importan de
  * `modules/`, que es server-side). La fórmula del ajuste está una sola vez:
- * `applyMethodAdjustment` del servicio delega en estas funciones, así que el
- * monto que previsualiza la pantalla es el mismo que después cobra el backend.
+ * `ruledCharge` de `lib/charge` compone estas funciones con la mora, y es la que
+ * usan las dos puntas: la vista previa de la pantalla y el cobro del backend.
  *
  * Los valores duplican el enum `PaymentMethod` de Prisma; el servicio tiene un
  * chequeo de tipos que deja de compilar si alguno de los dos se mueve.

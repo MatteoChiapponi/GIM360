@@ -792,6 +792,8 @@ Cada entrada de `schedules`:
 | `notes`         | string | No |
 | `amount`        | number | No |
 | `lateFeeWaived` | boolean | No (condona el recargo por mora de esta cuota) |
+| `chargedAmount` | number \| null | No (monto que se cobro de verdad; `null` borra el ajuste manual) |
+| `manualAdjustmentReason` | string \| null | No (motivo del ajuste manual, max 200) |
 
 **Validaciones:**
 - No se puede modificar un pago verificado (cierre de caja ya realizado).
@@ -800,17 +802,24 @@ Cada entrada de `schedules`:
 - Cobrar con un medio de pago deshabilitado devuelve 400.
 
 **Logica de montos:** el backend recalcula lo que se cobra y guarda la descomposicion
-`amount = baseAmount + lateFee + methodAdjustment`:
+`amount = baseAmount + lateFee + methodAdjustment + manualAdjustment`:
 - `baseAmount` — la cuota limpia.
 - `lateFee` / `lateDays` — recargo por mora segun la regla del gimnasio y los dias de atraso a la
   fecha de `paidAt`. Queda en 0 si el alumno es `lateFeeExempt` o si se manda `lateFeeWaived`.
 - `methodAdjustment` — recargo o descuento del medio de pago, calculado sobre cuota + mora.
+- `manualAdjustment` — la diferencia entre lo que dan esas reglas y el `chargedAmount` que manda
+  quien cobra: el redondeo del mostrador. Va firmado (+ se cobro de mas / − de menos) y se guarda
+  con su `manualAdjustmentReason`. Un ajuste ya guardado se mantiene si la edicion no manda
+  `chargedAmount` (corregirle el medio a un pago no borra el redondeo); `chargedAmount: null` lo
+  borra y devuelve el pago al monto calculado.
 
 Al despagar (o al limpiar el medio), `amount` vuelve a la cuota limpia y el resto se pone en `null`.
 
 **Retorna:** `Payment` actualizado.
 
-**Donde se usa:** `PaymentsView.tsx` — marcar como pagado, editar monto/notas.
+**Donde se usa:** `PaymentsView.tsx` — modal de cobro (medio de pago, condonar la mora y ajustar el
+monto a cobrar), cancelar un cobro (`status: PENDING`, que devuelve la cuota limpia) y editar
+monto/notas.
 
 ---
 
@@ -824,7 +833,8 @@ Al despagar (o al limpiar el medio), `amount` vuelve a la cuota limpia y el rest
 
 **Retorna:** 204 No Content.
 
-**Donde se usa:** `PaymentsView.tsx` — eliminar pago y regenerar.
+**Donde se usa:** Ningun lugar de la UI. Cancelar un cobro se hace con `PATCH status: PENDING`, que
+deja la cuota impaga en vez de borrarla; este DELETE borra el registro y queda para el owner.
 
 ---
 
@@ -907,7 +917,9 @@ vista previa del recargo antes de cobrar.
 | `gymId` | string (CUID) | Si |
 | `notes` | string | No |
 
-**Retorna:** `CashClosing` (201 Created) con totales por metodo de pago.
+**Retorna:** `CashClosing` (201 Created) con totales por metodo de pago. `adjustmentsCount` y
+`adjustmentsTotal` resumen lo que se ajusto a mano al cobrar: ya esta dentro de `totalCollected`,
+se informa aparte para ver la diferencia contra lo que decian las cuotas.
 
 **Donde se usa:** `PaymentsView.tsx` — boton "Cerrar caja".
 

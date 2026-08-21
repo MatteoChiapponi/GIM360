@@ -21,7 +21,7 @@ vi.mock("@/modules/payments/payments.service", () => ({
 
 import { auth } from "@/lib/auth"
 import { updatePayment } from "@/modules/payments/payments.service"
-import { applyMethodAdjustment } from "@/modules/payment-methods/payment-methods.service"
+import { ruledCharge } from "@/lib/charge"
 import { createGym } from "@/modules/gyms/gyms.service"
 import { IDS, SESSIONS, makeRequest, paymentRow, seedTwoGyms, withParams } from "./helpers"
 import { db, seed } from "./mocks/db"
@@ -51,27 +51,33 @@ async function markPaid(method: string) {
   )
 }
 
-describe("applyMethodAdjustment", () => {
-  it("sin ajuste deja el monto como está", () => {
-    expect(applyMethodAdjustment(10000, { adjustmentType: "NONE", adjustmentPercent: 0 }))
-      .toEqual({ amount: 10000, adjustment: 0 })
+describe("ruledCharge — el total que dan las reglas del gimnasio", () => {
+  it("sin ajuste ni mora deja el monto como está", () => {
+    expect(ruledCharge(10000, 0, { adjustmentType: "NONE", adjustmentPercent: 0 }))
+      .toEqual({ total: 10000, methodAdjustment: 0 })
   })
 
   it("el recargo suma y el descuento resta", () => {
-    expect(applyMethodAdjustment(10000, { adjustmentType: "SURCHARGE", adjustmentPercent: 10 }))
-      .toEqual({ amount: 11000, adjustment: 1000 })
-    expect(applyMethodAdjustment(10000, { adjustmentType: "DISCOUNT", adjustmentPercent: 5 }))
-      .toEqual({ amount: 9500, adjustment: -500 })
+    expect(ruledCharge(10000, 0, { adjustmentType: "SURCHARGE", adjustmentPercent: 10 }))
+      .toEqual({ total: 11000, methodAdjustment: 1000 })
+    expect(ruledCharge(10000, 0, { adjustmentType: "DISCOUNT", adjustmentPercent: 5 }))
+      .toEqual({ total: 9500, methodAdjustment: -500 })
+  })
+
+  it("el medio ajusta sobre la cuota con la mora ya sumada, no sobre la cuota sola", () => {
+    // 10000 + 1000 de mora = 11000, y el 10% se calcula sobre esos 11000
+    expect(ruledCharge(10000, 1000, { adjustmentType: "SURCHARGE", adjustmentPercent: 10 }))
+      .toEqual({ total: 12100, methodAdjustment: 1100 })
   })
 
   it("redondea a dos decimales", () => {
-    expect(applyMethodAdjustment(9999.99, { adjustmentType: "SURCHARGE", adjustmentPercent: 7.5 }))
-      .toEqual({ amount: 10749.99, adjustment: 750 })
+    expect(ruledCharge(9999.99, 0, { adjustmentType: "SURCHARGE", adjustmentPercent: 7.5 }))
+      .toEqual({ total: 10749.99, methodAdjustment: 750 })
   })
 
   it("un descuento del 100% no deja el monto en negativo", () => {
-    expect(applyMethodAdjustment(10000, { adjustmentType: "DISCOUNT", adjustmentPercent: 100 }))
-      .toEqual({ amount: 0, adjustment: -10000 })
+    expect(ruledCharge(10000, 0, { adjustmentType: "DISCOUNT", adjustmentPercent: 100 }))
+      .toEqual({ total: 0, methodAdjustment: -10000 })
   })
 })
 
