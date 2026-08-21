@@ -6,11 +6,11 @@ import { Button } from "@/components/ui/Button"
 import { PaymentMethodIcon } from "@/components/ui/PaymentMethodIcon"
 import {
   PAYMENT_METHOD_LABEL as METHOD_LABEL,
-  adjustedAmount,
   adjustmentLabel,
   type PaymentMethodConfig,
   type PaymentMethodValue as PaymentMethod,
 } from "@/lib/payment-methods"
+import { ruledCharge } from "@/lib/charge"
 import { formatMoney, round2, signedMoney } from "@/lib/money"
 import { daysLabel, lateDaysAt } from "@/lib/late-fee"
 import { formatMonthYear as periodLabel } from "@/lib/timezone"
@@ -64,12 +64,13 @@ export function PayPaymentModal({ payment, period, methodConfigs, lateFee, busy,
   /**
    * Lo que dan las reglas del gimnasio con ese medio: cuota + mora + el recargo o
    * descuento del medio. Es el punto de partida del monto a cobrar, y contra esto
-   * se mide el ajuste manual.
+   * se mide el ajuste manual. La cuenta es la de `lib/charge`, la misma que rehace
+   * el backend al cobrar: por eso el número que se ve acá es el que se guarda.
    */
   function ruledTotalFor(method: PaymentMethod, waived: boolean): number {
     const config = methodConfigs.find((c) => c.method === method)
-    const base = chargeableFor(waived)
-    return config ? adjustedAmount(base, config) : base
+    if (!config) return chargeableFor(waived)
+    return ruledCharge(cuota, waived ? 0 : lateFee, config).total
   }
 
   // Con un solo medio habilitado no hay nada que elegir: queda listo para cobrar.

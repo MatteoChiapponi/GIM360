@@ -82,6 +82,7 @@ if (session.user.role === "TRAINER") {
 | `lib/utils.ts` | `cn()` helper (clsx + tailwind-merge) |
 | `lib/money.ts` | `round2()`, `formatMoney()` y `signedMoney()` — el redondeo de todo monto que se guarda, compartido por servicios y vistas |
 | `lib/payment-methods.ts` | Parte client-safe de los medios de pago: valores, etiquetas y la fórmula del ajuste |
+| `lib/charge.ts` | `ruledCharge()` — el orden de las reglas (mora primero, medio después), compartido por el modal de cobro y el backend |
 | `lib/late-fee.ts` | Parte client-safe de la mora: vencimiento, días de atraso y la fórmula del recargo |
 | `lib/timezone.ts` | **La zona horaria del proyecto: Argentina.** Todo cálculo de fecha pasa por acá — ver más abajo |
 | `instrumentation.ts` | Arranque del server: le clava `process.env.TZ` en `America/Argentina/Buenos_Aires` |
@@ -221,8 +222,9 @@ gimnasio entra por fuera del alta (un insert a mano, un restore).
 - **Dónde vive qué**: `modules/payment-methods/` tiene el acceso a datos y `payments.pricing.ts`
   resuelve qué montos guardar en un update de pago (el route handler solo traduce el resultado a
   HTTP). `lib/payment-methods.ts` es la parte client-safe — valores, etiquetas y la fórmula del
-  ajuste — que importan tanto las vistas como el servicio, para que la vista previa y el cobro no
-  puedan calcular distinto.
+  ajuste — y `lib/charge.ts` compone esa fórmula con la mora en el orden que corresponde. Las dos
+  las importan tanto las vistas como el backend: que la cuenta sea una sola es lo que garantiza que
+  la vista previa del modal y el cobro no puedan dar distinto.
 - **Cobro**: el ajuste lo calcula el backend en `PATCH /api/payments/:id`, nunca el cliente. Guarda
   `baseAmount` (la cuota), `methodAdjustment` (firmado) y deja en `amount` el monto realmente
   cobrado, que es el que suman cierres de caja y métricas (ahí también entra el ajuste manual, ver
@@ -346,7 +348,7 @@ Lo que sí se mockea: `@/lib/auth` (la sesión), `@/lib/logger` y los servicios 
 | `tests/timezone.test.ts` | Los helpers de fecha, corridos en cuatro zonas de runtime: el resultado no puede cambiar |
 | `tests/payment-methods.test.ts` | Cálculo del recargo/descuento, cobro con la config del gimnasio, medio deshabilitado, invariante de "al menos uno habilitado" |
 | `tests/late-fee.test.ts` | Días de atraso y fórmula de la mora, orden mora → medio de pago, exención y condonación, congelado contra `paidAt`, validación de la regla |
-| `tests/manual-adjustment.test.ts` | El monto ajustado a mano al cobrar: el ajuste como diferencia contra las reglas, la descomposición que cierra, qué lo borra y qué lo conserva, y su resumen en el cierre de caja |
+| `tests/manual-adjustment.test.ts` | El monto ajustado a mano al cobrar: el ajuste como diferencia contra las reglas, qué lo borra y qué lo conserva, y su resumen en el cierre de caja. `expectSoundCharge()` corre en cada cobro las invariantes que no pueden romperse nunca: la descomposición que cierra, el piso en 0, el motivo atado al ajuste y que `chargedAmount` no llegue a la DB |
 
 Al agregar un endpoint que acepte más de un rol, sumalo al catálogo de `api-access.test.ts`: las
 listas `RECEPTIONIST_ALLOWED` / `RECEPTIONIST_DENIED` son la definición ejecutable de los permisos.

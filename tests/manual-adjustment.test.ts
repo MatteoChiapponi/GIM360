@@ -24,6 +24,8 @@ import { auth } from "@/lib/auth"
 import { updatePayment } from "@/modules/payments/payments.service"
 import { createCashClosing } from "@/modules/cash-closings/cash-closings.service"
 import { DEFAULT_LATE_FEE_CONFIG, type LateFeeConfig } from "@/lib/late-fee"
+import { ruledCharge } from "@/lib/charge"
+import { round2 } from "@/lib/money"
 import { IDS, SESSIONS, makeRequest, paymentRow, seedTwoGyms, withParams } from "./helpers"
 import { db, seed } from "./mocks/db"
 
@@ -37,6 +39,9 @@ beforeEach(() => {
 
 /** El pago del fixture vence el 10/08/2026; salvo que se diga otra cosa se cobra en fecha. */
 const PAID_AT = new Date(2026, 7, 5, 12, 0, 0)
+
+/** Diez días después del vencimiento, para los casos con mora corrida. */
+const PAID_LATE = new Date(2026, 7, 20, 12, 0, 0)
 
 function seedConfigs(rows: Record<string, unknown>[]) {
   seed("paymentMethodConfig", rows.map((r, i) => ({ id: `cfg${i}`, gymId: IDS.gym1, ...r })))
@@ -64,6 +69,29 @@ function savedFields(): Record<string, number | string | null | boolean> {
   return mockUpdatePayment.mock.calls[0][1] as Record<string, number | string | null | boolean>
 }
 
+/**
+ * Lo que tiene que cumplir todo cobro, se le haya tocado el monto o no.
+ *
+ * Van juntas y las corre cada caso, no solo el que se acordó de escribirlas: los
+ * `toMatchObject` de acá abajo dejan pasar cualquier campo que el test no nombre,
+ * y en plata el campo que nadie mira es justo el que descuadra la caja.
+ */
+function expectSoundCharge() {
+  const f = savedFields()
+  const parts = ["baseAmount", "lateFee", "methodAdjustment", "manualAdjustment"] as const
+  const sum = parts.reduce((acc, k) => acc + Number(f[k]), 0)
+
+  // La descomposición cierra: lo cobrado es exactamente la suma de sus partes
+  expect(f.amount).toBe(round2(sum))
+  // Nunca se cobra en negativo
+  expect(Number(f.amount)).toBeGreaterThanOrEqual(0)
+  // El motivo solo existe si hay un ajuste que explicar
+  if (f.manualAdjustment === 0) expect(f.manualAdjustmentReason).toBeNull()
+  // `chargedAmount` es la intención de quien cobra, no una columna: si llegara
+  // hasta el update, Prisma lo rechazaría en producción y acá no se vería.
+  expect(f).not.toHaveProperty("chargedAmount")
+}
+
 // ─── Cobro con el monto ajustado a mano ──────────────────────────────────────
 
 describe("Quien cobra puede ajustar el monto de la cuota", () => {
@@ -77,36 +105,42 @@ describe("Quien cobra puede ajustar el monto de la cuota", () => {
       manualAdjustment: 0,
       manualAdjustmentReason: null,
     })
+    expectSoundCharge()
   })
 
   it("redondear para abajo se guarda como un ajuste negativo", async () => {
     await markPaid({ chargedAmount: 9500 })
 
     expect(savedFields()).toMatchObject({ amount: 9500, baseAmount: 10000, manualAdjustment: -500 })
+    expectSoundCharge()
   })
 
   it("cobrar de más se guarda como un ajuste positivo", async () => {
     await markPaid({ chargedAmount: 10500 })
 
     expect(savedFields()).toMatchObject({ amount: 10500, baseAmount: 10000, manualAdjustment: 500 })
+    expectSoundCharge()
   })
 
   it("el motivo del ajuste queda registrado", async () => {
     await markPaid({ chargedAmount: 9950, manualAdjustmentReason: "  Redondeo  " })
 
     expect(savedFields()).toMatchObject({ manualAdjustment: -50, manualAdjustmentReason: "Redondeo" })
+    expectSoundCharge()
   })
 
   it("un motivo sin ajuste no se guarda: no hay nada que explicar", async () => {
     await markPaid({ chargedAmount: 10000, manualAdjustmentReason: "Redondeo" })
 
     expect(savedFields()).toMatchObject({ manualAdjustment: 0, manualAdjustmentReason: null })
+    expectSoundCharge()
   })
 
   it("cobrar cero deja el monto en cero y el ajuste se lleva toda la cuota", async () => {
     await markPaid({ chargedAmount: 0 })
 
     expect(savedFields()).toMatchObject({ amount: 0, baseAmount: 10000, manualAdjustment: -10000 })
+    expectSoundCharge()
   })
 
   it("la recepcionista también puede ajustar el monto", async () => {
@@ -116,6 +150,7 @@ describe("Quien cobra puede ajustar el monto de la cuota", () => {
 
     expect(res.status).toBe(200)
     expect(savedFields()).toMatchObject({ amount: 9800, manualAdjustment: -200 })
+    expectSoundCharge()
   })
 
   it("un monto negativo no se acepta", async () => {
@@ -129,6 +164,7 @@ describe("Quien cobra puede ajustar el monto de la cuota", () => {
     await markPaid({ chargedAmount: 9999.99 })
 
     expect(savedFields()).toMatchObject({ amount: 9999.99, manualAdjustment: -0.01 })
+    expectSoundCharge()
   })
 
   it("no se puede fijar el monto de una cuota que no se está cobrando", async () => {
@@ -160,7 +196,7 @@ describe("El ajuste manual se mide contra el total que dan las reglas del gimnas
     // 10000 de cuota + 1000 de mora = 11000, y sobre eso el 10% de tarjeta = 12100
     await markPaid({
       paymentMethod: "CARD",
-      paidAt: new Date(2026, 7, 20, 12, 0, 0).toISOString(),
+      paidAt: PAID_LATE.toISOString(),
       chargedAmount: 12000,
     })
 
@@ -171,29 +207,40 @@ describe("El ajuste manual se mide contra el total que dan las reglas del gimnas
       methodAdjustment: 1100,
       manualAdjustment: -100,
     })
+    expectSoundCharge()
   })
 
-  it("los montos guardados cierran: amount = cuota + mora + medio + ajuste manual", async () => {
+  it("la vista previa del modal y lo que se termina cobrando dan el mismo número", async () => {
     seedRule({ enabled: true, feeType: "PERCENT", feeValue: 10 })
-    seedConfigs([{ method: "CASH", enabled: true, adjustmentType: "DISCOUNT", adjustmentPercent: 5 }])
+    const card = { adjustmentType: "SURCHARGE", adjustmentPercent: 10 } as const
+    seedConfigs([{ method: "CARD", enabled: true, ...card }])
 
-    await markPaid({ paidAt: new Date(2026, 7, 20, 12, 0, 0).toISOString(), chargedAmount: 10000 })
+    // El total que el modal le muestra a quien cobra sale de `ruledCharge`; es la
+    // misma función que usa el backend, así que este test falla si alguien cambia
+    // el orden de las reglas de un solo lado.
+    const preview = ruledCharge(10000, 1000, card)
 
-    const f = savedFields() as Record<string, number>
-    expect(f.amount).toBe(f.baseAmount + f.lateFee + f.methodAdjustment + f.manualAdjustment)
+    await markPaid({ paymentMethod: "CARD", paidAt: PAID_LATE.toISOString(), chargedAmount: null })
+
+    expect(savedFields()).toMatchObject({
+      amount: preview.total,
+      methodAdjustment: preview.methodAdjustment,
+    })
+    expectSoundCharge()
   })
 
   it("condonar la mora mueve el total contra el que se mide el ajuste", async () => {
     seedRule({ enabled: true, feeType: "PERCENT", feeValue: 10 })
 
     await markPaid({
-      paidAt: new Date(2026, 7, 20, 12, 0, 0).toISOString(),
+      paidAt: PAID_LATE.toISOString(),
       lateFeeWaived: true,
       chargedAmount: 9500,
     })
 
     // Sin mora el total es la cuota limpia: el ajuste son 500, no 1500
     expect(savedFields()).toMatchObject({ lateFee: 0, manualAdjustment: -500, amount: 9500 })
+    expectSoundCharge()
   })
 })
 
@@ -219,6 +266,7 @@ describe("Un ajuste ya guardado sobrevive a las ediciones que no lo tocan", () =
 
     // 11000 según la tarjeta, menos los 500 que se le habían redondeado
     expect(savedFields()).toMatchObject({ amount: 10500, methodAdjustment: 1000, manualAdjustment: -500 })
+    expectSoundCharge()
   })
 
   it("editar una nota no recalcula nada", async () => {
@@ -239,6 +287,7 @@ describe("Un ajuste ya guardado sobrevive a las ediciones que no lo tocan", () =
       manualAdjustment: 0,
       manualAdjustmentReason: null,
     })
+    expectSoundCharge()
   })
 
   it("si el ajuste se queda en cero el motivo se va con él", async () => {
@@ -254,6 +303,7 @@ describe("Un ajuste ya guardado sobrevive a las ediciones que no lo tocan", () =
       manualAdjustment: 0,
       manualAdjustmentReason: null,
     })
+    expectSoundCharge()
   })
 
   it("la recepcionista puede cancelar un cobro y el ajuste se va con él", async () => {

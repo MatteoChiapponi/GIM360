@@ -1,9 +1,7 @@
 import type { Payment, PaymentMethod, Student } from "@/app/generated/prisma/client"
-import {
-  applyMethodAdjustment,
-  getPaymentMethodConfig,
-} from "@/modules/payment-methods/payment-methods.service"
+import { getPaymentMethodConfig } from "@/modules/payment-methods/payment-methods.service"
 import { getLateFeeConfig, lateFeeFor } from "@/modules/late-fees/late-fees.service"
+import { ruledCharge } from "@/lib/charge"
 import { round2 } from "@/lib/money"
 import type { UpdatePaymentInput } from "./payments.schema"
 
@@ -151,8 +149,9 @@ export async function resolvePaymentAmounts(
   const { fee, lateDays } = lateFeeFor(baseAmount, existing.period, existing.student.dueDay, lateConfig, chargedAt)
   const lateFee = exempt ? 0 : fee
 
-  // Lo que dan las reglas del gimnasio, antes de que nadie lo toque a mano.
-  const { amount: ruled, adjustment } = applyMethodAdjustment(round2(baseAmount + lateFee), config)
+  // Lo que dan las reglas del gimnasio, antes de que nadie lo toque a mano. La
+  // cuenta sale de `lib/charge`, la misma que usa la vista previa del modal.
+  const { total: ruled, methodAdjustment: adjustment } = ruledCharge(baseAmount, lateFee, config)
 
   const manual = manualAdjustmentFor(input.chargedAmount, existing.manualAdjustment, ruled)
 
