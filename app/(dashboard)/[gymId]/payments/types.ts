@@ -11,7 +11,16 @@ export type PaymentStatus = "PENDING" | "PAID" | "EXPIRED"
 
 export type Payment = {
   id: string
+  /** Precio de lista de los grupos, antes del descuento */
+  listAmount: string
+  /** Lo que se debe (listAmount - discountAmount); al cobrar, lo que se cobró */
   amount: string
+  /** Descuento aplicado a la cuota; 0 si lo tiene asignado pero no se aplica */
+  discountAmount: string
+  /** Nombre del descuento, aunque no se esté aplicando (snapshot) */
+  discountName: string | null
+  /** Decisión manual sobre el descuento: null = automático */
+  discountOverride: boolean | null
   status: PaymentStatus
   paidAt: string | null
   paymentMethod: PaymentMethodValue | null

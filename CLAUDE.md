@@ -44,6 +44,8 @@ groupBelongsToGym(groupId, gymId)         // group.gymId === gymId
 scheduleBelongsToGroup(scheduleId, groupId)
 trainerBelongsToGroup(trainerId, groupId)
 studentBelongsToGroup(studentId, groupId)
+discountBelongsToGym(discountId, gymId)
+assignmentBelongsToStudent(assignmentId, studentId)  // StudentDiscount.studentId === studentId
 ```
 
 En handlers que aceptan más de un rol (ej. `[OWNER, RECEPTIONIST]`), el belongs va con
@@ -160,7 +162,7 @@ User (auth)
  │    └── Gym[]
  │         ├── Trainer[]       (optional User 1:1 — trainer may not have login)
  │         ├── Receptionist[]  (required User 1:1 — only exists to log in)
- │         ├── Student[]
+ │         ├── Student[]           (StudentDiscount[] — descuentos asignados)
  │         ├── Group[]
  │         │    ├── TrainerGroup[]  (junction, includes hourlyRate)
  │         │    │    └── TrainerGroupSchedule[]
@@ -171,6 +173,7 @@ User (auth)
  │         ├── PaymentMethodConfig[]  (uno por PaymentMethod; sin fila = habilitado y sin ajuste)
  │         ├── LateFeeConfig 0:1        (recargo por mora; sin fila = regla apagada)
  │         ├── StudentFile[]
+ │         ├── Discount[]         (StudentDiscount[] los asigna a alumnos, con vigencia)
  │         └── FixedExpense[]
  ├── Trainer 1:1  (optional)
  └── Receptionist 1:1  (optional)
@@ -189,8 +192,60 @@ User (auth)
 `components/layout/NavLinks.tsx`). Puede hacer CRUD de alumnos (incluidas fichas y apto médico),
 inscribirlos en grupos, generar las cuotas del mes, registrar pagos y cancelarlos mientras no haya
 cierre de caja de por medio, y cargar asistencias.
-Quedan fuera: cierres de caja, gastos, métricas, grupos, entrenadores y la configuración del gimnasio. `active: false` corta el
+Sobre la cuota que está cobrando puede aplicar o sacar el descuento a mano, aunque no configure
+descuentos. Quedan fuera: cierres de caja, gastos, métricas, grupos, entrenadores, los descuentos y
+el resto de la configuración del gimnasio. `active: false` corta el
 acceso sin borrar el registro; `DELETE` borra el `User` y arrastra al `Receptionist` por cascade.
+
+### Descuentos → cuotas
+
+`Discount` es del gimnasio y lo configura solo el owner. `StudentDiscount` lo ata a un alumno con
+vigencia en períodos mensuales (`validFrom` / `validUntil`, el primer día del mes como `Payment.period`;
+`validUntil` null = sin corte). El servicio rechaza vigencias solapadas para un mismo alumno, así que
+en cada período hay **a lo sumo un descuento aplicable**.
+
+El descuento se aplica **al generar/sincronizar las cuotas** (`generateMonthlyPayments`), no al
+cobrarlas. De ahí sale lo que el alumno debe, y eso es el punto de partida del cobro:
+
+```
+listAmount − discountAmount = amount                                   (al generar la cuota)
+baseAmount := amount
+baseAmount + lateFee + methodAdjustment + manualAdjustment = amount    (al cobrarla)
+```
+
+Ojo con los dos nombres, que es el error fácil: `listAmount` es el precio de lista de los grupos y
+`baseAmount` es la cuota limpia congelada en el momento del cobro — con el descuento ya aplicado.
+
+Las cuotas `PAID` nunca se recalculan: quedan congeladas con `discountName` como snapshot, que
+sobrevive incluso al borrado del descuento.
+
+Un descuento con `loseOnLatePayment` deja de aplicarse cuando la cuota pasa **su** plazo: los días de
+atraso (`lateDaysAt` de `lib/late-fee`, el mismo que decide si está vencida) superan sus `graceDays`.
+Son dos relojes distintos y conviene no confundirlos — la cuota pasa a `EXPIRED` en su vencimiento,
+mientras el descuento puede seguir en pie durante la gracia. No se borra: la cuota conserva
+`discountId` y `discountName` con `discountAmount` en cero, así la vista puede mostrar cuál se perdió
+y el descuento vuelve solo si el plazo deja de estar pasado. `expireOverduePayments` mueve estado y
+descuento en el mismo paso, así que la regla se aplica también en las lecturas.
+
+Sobre cada cuota, `Payment.discountOverride` es la última palabra: `null` = automático (manda la
+regla), `true` = aplicarlo igual, `false` = no aplicarlo. Lo setea `PATCH /api/payments/:id` con
+`discountOverride` y lo puede usar tanto el owner como el recepcionista, que es quien cobra. El monto
+lo recalcula `setDiscountOverride` desde `listAmount`, y la decisión queda guardada en la fila, así
+que las sincronizaciones no la pisan. Solo sobre cuotas no cobradas: una `PAID` hay que desmarcarla
+primero. La decisión vale para el descuento sobre el que se tomó: si el aplicable cambia, la cuota
+vuelve al automático en vez de arrastrar un criterio que era sobre otra cosa.
+
+Borrar un descuento lo desasigna de todos los alumnos (las `StudentDiscount` caen por cascade) y,
+en la misma transacción, devuelve al precio de lista las cuotas sin cobrar que lo tenían aplicado.
+Quitarle el descuento a un alumno hace lo mismo, acotado a él y a los períodos de esa vigencia.
+`active: false` es la alternativa cuando se quiere retirar de las cuotas nuevas conservando
+asignaciones e historial.
+
+El cálculo vive aislado en `modules/discounts/discounts.calc.ts`: funciones puras, sin DB y sin el
+cliente de Prisma, así lo importan por igual los servicios y las vistas (que previsualizan el monto
+antes de guardar). `effectiveDiscountAmount` es el único lugar donde se decide cuánto se descuenta:
+los tres caminos que tocan el monto —generar la cuota, recalcularla al vencer y la decisión manual—
+pasan por ahí, así no pueden discrepar.
 
 ### Enums (in schema.prisma)
 - `UserRole`: `ADMIN | OWNER | TRAINER | RECEPTIONIST`
@@ -202,6 +257,7 @@ acceso sin borrar el registro; `DELETE` borra el `User` y arrastra al `Reception
 - `LateFeeType`: `FIXED | PERCENT` — si el recargo por mora es un monto en pesos o un % de la cuota
 - `StudentFileType`: `FICHA | APTO_MEDICO`
 - `DayOfWeek`: `MONDAY | TUESDAY | WEDNESDAY | THURSDAY | FRIDAY | SATURDAY | SUNDAY`
+- `DiscountType`: `PERCENTAGE | FIXED_AMOUNT | FIXED_PRICE`
 
 ### Medios de pago
 
@@ -345,6 +401,11 @@ Lo que sí se mockea: `@/lib/auth` (la sesión), `@/lib/logger` y los servicios 
 | `tests/role-routing.test.ts` | Ruteo por rol del proxy + invariante de que ningún redirect encadena otro |
 | `tests/guards.test.ts` | `requireGymRole` y su fallback por rol |
 | `tests/receptionists.service.test.ts` | Alta transaccional, email duplicado, hash de contraseña, borrado por cascade |
+| `tests/discounts.calc.test.ts` | El cálculo del descuento: los tres tipos, los topes (nunca negativo, nunca recargo), vigencias y solapamientos |
+| `tests/discounts.schema.test.ts` | Lo que la API acepta y lo que no: tope del 100% solo para porcentajes, decimales, días de gracia, formato del período |
+| `tests/discounts.service.test.ts` | Borrar/desasignar un descuento (las cuotas sin cobrar vuelven al precio de lista, las pagadas no se tocan) y la validación de vigencias al asignarlo |
+| `tests/payments.sync.test.ts` | Generar y recalcular las cuotas del mes: precio de lista + descuento, plazos de gracia, resincronización, y que la decisión manual no se pise |
+| `tests/payments.service.test.ts` | La decisión manual del descuento sobre una cuota: aplicar, sacar, volver al automático, y qué se rechaza |
 | `tests/timezone.test.ts` | Los helpers de fecha, corridos en cuatro zonas de runtime: el resultado no puede cambiar |
 | `tests/payment-methods.test.ts` | Cálculo del recargo/descuento, cobro con la config del gimnasio, medio deshabilitado, invariante de "al menos uno habilitado" |
 | `tests/late-fee.test.ts` | Días de atraso y fórmula de la mora, orden mora → medio de pago, exención y condonación, congelado contra `paidAt`, validación de la regla |
@@ -398,6 +459,11 @@ modules/                    ← Business logic, one folder per domain
   receptionists/
   groups/
   schedules/
+  discounts/
+    discounts.calc.ts       ← Cálculo puro del descuento (sin DB ni Prisma) — lo usan servicios y vistas
+    discounts.errors.ts     ← Errores de dominio → status HTTP
+    discounts.service.ts
+    discounts.schema.ts
   payment-methods/          ← Config por gimnasio de cada medio de pago
   late-fees/                ← Regla de recargo por mora del gimnasio
 

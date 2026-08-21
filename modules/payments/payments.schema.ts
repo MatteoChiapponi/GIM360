@@ -11,7 +11,18 @@ export const updatePaymentSchema = z.object({
   paymentMethod: z.nativeEnum(PaymentMethod).nullable().optional(),
   paidAt: z.string().datetime().nullable().optional(),
   notes: z.string().nullable().optional(),
+  /**
+   * La cuota limpia con la que se cobra. Mientras está impaga la define el
+   * precio de lista menos el descuento, así que mandarla a mano acá dura hasta
+   * la próxima sincronización; al cobrar es el punto de partida de los ajustes.
+   */
   amount: z.number().positive().multipleOf(0.01).optional(),
+  /**
+   * Decisión manual sobre el descuento de esta cuota: true = aplicarlo igual,
+   * false = no aplicarlo, null = volver al automático. Va sola: el handler la
+   * atiende aparte y recalcula el monto en el servidor.
+   */
+  discountOverride: z.boolean().nullable().optional(),
   /** Condona el recargo por mora de esta cuota puntual, sin tocar la regla del gimnasio. */
   lateFeeWaived: z.boolean().optional(),
   /**
@@ -26,11 +37,15 @@ export const updatePaymentSchema = z.object({
 })
 
 /**
- * Lo que del body se puede guardar tal cual. `chargedAmount` queda afuera a
- * propósito: es la intención de quien cobra, no una columna — `resolvePaymentAmounts`
- * la traduce a `manualAdjustment` antes de que el update llegue a la DB.
+ * Lo que del body se puede guardar tal cual. Quedan afuera a propósito los dos
+ * campos que son una intención y no una columna: `chargedAmount`, que
+ * `resolvePaymentAmounts` traduce a `manualAdjustment`, y `discountOverride`,
+ * que el handler atiende por su cuenta recalculando el monto.
  */
-export const persistablePaymentSchema = updatePaymentSchema.omit({ chargedAmount: true })
+export const persistablePaymentSchema = updatePaymentSchema.omit({
+  chargedAmount: true,
+  discountOverride: true,
+})
 
 export type GeneratePaymentsInput = z.infer<typeof generatePaymentsSchema>
 export type UpdatePaymentInput = z.infer<typeof updatePaymentSchema>

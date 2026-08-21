@@ -45,7 +45,21 @@ vi.mock("@/modules/payments/payments.service", () => ({
   getPaymentsByStudent: vi.fn(async () => []),
   generateMonthlyPayments: vi.fn(async () => []),
   updatePayment: vi.fn(async () => ({ id: "p" })),
+  setDiscountOverride: vi.fn(async () => ({ id: "p" })),
   deletePayment: vi.fn(async () => undefined),
+}))
+
+vi.mock("@/modules/discounts/discounts.service", () => ({
+  getDiscountsByGym: vi.fn(async () => []),
+  getDiscountById: vi.fn(async () => ({ id: "cdiscount000000000000001" })),
+  createDiscount: vi.fn(async () => ({ id: "cdiscount000000000000001" })),
+  updateDiscount: vi.fn(async () => ({ id: "cdiscount000000000000001" })),
+  deleteDiscount: vi.fn(async () => undefined),
+  getStudentDiscounts: vi.fn(async () => []),
+  assignDiscountToStudent: vi.fn(async () => ({ id: "cassign00000000000000001" })),
+  updateStudentDiscount: vi.fn(async () => ({ id: "cassign00000000000000001" })),
+  removeStudentDiscount: vi.fn(async () => undefined),
+  getAssignmentsForStudents: vi.fn(async () => []),
 }))
 
 vi.mock("@/modules/attendance/attendance.service", () => ({
@@ -382,6 +396,63 @@ const RECEPTIONIST_DENIED: Endpoint[] = [
       ),
   },
   {
+    name: "GET /api/discounts",
+    call: async (gymId) => (await import("@/app/api/discounts/route")).GET(makeRequest(`/api/discounts?gymId=${gymId}`)),
+  },
+  {
+    name: "POST /api/discounts",
+    call: async (gymId) =>
+      (await import("@/app/api/discounts/route")).POST(
+        makeRequest("/api/discounts", {
+          method: "POST",
+          body: { gymId, name: "Hermanos", type: "PERCENTAGE", value: 20 },
+        }),
+      ),
+  },
+  {
+    name: "PATCH /api/discounts/[id]",
+    call: async (gymId) =>
+      (await import("@/app/api/discounts/[id]/route")).PATCH(
+        makeRequest(`/api/discounts/${IDS.discount1}?gymId=${gymId}`, { method: "PATCH", body: { value: 15 } }),
+        withParams({ id: IDS.discount1 }),
+      ),
+  },
+  {
+    name: "DELETE /api/discounts/[id]",
+    call: async (gymId) =>
+      (await import("@/app/api/discounts/[id]/route")).DELETE(
+        makeRequest(`/api/discounts/${IDS.discount1}?gymId=${gymId}`, { method: "DELETE" }),
+        withParams({ id: IDS.discount1 }),
+      ),
+  },
+  {
+    name: "GET /api/students/[id]/discounts",
+    call: async (gymId) =>
+      (await import("@/app/api/students/[id]/discounts/route")).GET(
+        makeRequest(`/api/students/${IDS.student1}/discounts?gymId=${gymId}`),
+        withParams({ id: IDS.student1 }),
+      ),
+  },
+  {
+    name: "POST /api/students/[id]/discounts (asignar)",
+    call: async (gymId) =>
+      (await import("@/app/api/students/[id]/discounts/route")).POST(
+        makeRequest(`/api/students/${IDS.student1}/discounts?gymId=${gymId}`, {
+          method: "POST",
+          body: { discountId: IDS.discount1, validFrom: "2026-03" },
+        }),
+        withParams({ id: IDS.student1 }),
+      ),
+  },
+  {
+    name: "DELETE /api/students/[id]/discounts/[assignmentId]",
+    call: async (gymId) =>
+      (await import("@/app/api/students/[id]/discounts/[assignmentId]/route")).DELETE(
+        makeRequest(`/api/students/${IDS.student1}/discounts/${IDS.assignment1}?gymId=${gymId}`, { method: "DELETE" }),
+        withParams({ id: IDS.student1, assignmentId: IDS.assignment1 }),
+      ),
+  },
+  {
     name: "POST /api/schedules",
     call: async () =>
       (await import("@/app/api/schedules/route")).POST(
@@ -458,6 +529,30 @@ describe("El owner conserva el acceso completo a su gimnasio", () => {
     for (const { call } of RECEPTIONIST_DENIED.filter((e) => e.ownerAllowed === false)) {
       expect((await call(G1)).status).toBe(403)
     }
+  })
+})
+
+describe("Los descuentos no cruzan de gimnasio", () => {
+  const DISCOUNT_ENDPOINTS = RECEPTIONIST_DENIED.filter((e) => e.name.includes("discounts"))
+
+  it.each(DISCOUNT_ENDPOINTS)("$name contra el gimnasio ajeno → 403", async ({ call }) => {
+    loginAs(SESSIONS.owner1())
+    const res = await call(G2)
+    expect(res.status).toBe(403)
+  })
+
+  it("un owner con dos gimnasios no puede asignar el descuento de uno a un alumno del otro", async () => {
+    loginAs(SESSIONS.owner1())
+    const { POST } = await import("@/app/api/students/[id]/discounts/route")
+    const res = await POST(
+      makeRequest(`/api/students/${IDS.student1}/discounts?gymId=${G1}`, {
+        method: "POST",
+        // discount2 es de gym2; el alumno y el gymId de la request son de gym1.
+        body: { discountId: IDS.discount2, validFrom: "2026-03" },
+      }),
+      withParams({ id: IDS.student1 }),
+    )
+    expect(res.status).toBe(403)
   })
 })
 

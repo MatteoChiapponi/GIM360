@@ -17,6 +17,7 @@ import {
   type PaymentMethodValue as PaymentMethod,
 } from "@/lib/payment-methods"
 import { formatMoney, signedMoney } from "@/lib/money"
+import { ON_TIME_ONLY_LABEL } from "@/lib/discounts-format"
 import {
   DEFAULT_LATE_FEE_CONFIG,
   computeLateFee,
@@ -136,6 +137,8 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(false)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
+  // Toggle manual del descuento sobre una cuota puntual
+  const [togglingDiscountId, setTogglingDiscountId] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   type SortKey = "name" | "amount" | "due" | "status"
   const [sortKey, setSortKey] = useState<SortKey>("status")
@@ -313,6 +316,30 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
    * verificado devuelve 409, así que solo se puede cancelar lo que todavía no
    * entró en un cierre de caja: la ventana que el cierre después revisa.
    */
+  /** Aplica o saca el descuento de esa cuota puntual. El monto lo recalcula el
+   *  servidor; acá solo se refleja lo que devuelve. */
+  async function handleToggleDiscount(id: string, apply: boolean | null) {
+    setMutationError(null)
+    setTogglingDiscountId(id)
+    try {
+      const res = await fetch(`/api/payments/${id}?gymId=${gymId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ discountOverride: apply }),
+      })
+      if (res.ok) {
+        const updated = await res.json()
+        setPayments((prev) => prev.map((p) => (p.id === id ? updated : p)))
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setMutationError(typeof data?.error === "string" ? data.error : "No se pudo cambiar el descuento.")
+      }
+    } catch {
+      setMutationError("Error de conexión. Intentá de nuevo.")
+    } finally {
+      setTogglingDiscountId(null)
+    }
+  }
+
   async function handleUnmarkPaid(id: string) {
     setConfirmUnpayId(null)
     setMutationError(null)
@@ -736,9 +763,40 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
               // En una cuota impaga la mora todavía corre: se muestra aparte del
               // monto de la cuota, que es lo que se cobraría si se pagara hoy.
               const fee = p.status === "PAID" ? 0 : chargedLateFee(p)
+              const discount = Number(p.discountAmount)
               return (
-                <div className="flex flex-col items-end">
-                  <span className="font-mono font-medium text-[#111110]">${Number(p.amount).toLocaleString("es-AR")}</span>
+                <div className="flex flex-col items-end gap-0.5">
+                  <span className="font-mono font-medium text-[#111110]">{formatMoney(Number(p.amount))}</span>
+                  {discount > 0 && (
+                    <span className="text-[10px] text-[#A5A49D]">
+                      <span className="line-through">{formatMoney(Number(p.listAmount))}</span>
+                      {" · "}
+                      <span className="text-emerald-700">−{formatMoney(discount)}</span>
+                    </span>
+                  )}
+                  {p.discountName && (
+                    discount > 0 ? (
+                      <span
+                        className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700"
+                        title={p.discountOverride === true ? "Aplicado a mano en esta cuota" : undefined}
+                      >
+                        {p.discountName}{p.discountOverride === true ? " ·" : ""}
+                      </span>
+                    ) : (
+                      // Lo tiene asignado pero no se le está aplicando: tachado,
+                      // para que se entienda por qué paga el precio de lista.
+                      <span
+                        className="rounded-full bg-[#F0EFEB] px-1.5 py-0.5 text-[10px] font-medium text-[#A5A49D] line-through"
+                        title={
+                          p.discountOverride === false
+                            ? "El descuento se sacó a mano en esta cuota"
+                            : `${ON_TIME_ONLY_LABEL}: pasó el plazo para pagarlo con descuento`
+                        }
+                      >
+                        {p.discountName}
+                      </span>
+                    )
+                  )}
                   {fee > 0 && (
                     <span className="font-mono text-[11px] font-medium text-amber-700" title="Recargo por mora acumulado">
                       + {formatMoney(fee)} mora
@@ -944,13 +1002,17 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
         <PayPaymentModal
           // Un modal por cuota: al cambiar de cobro se monta de cero y no puede
           // quedar el redondeo de un alumno colgado en el del siguiente.
-          key={payMethodPayment.id}
+          // El descuento entra en la clave porque cambia la cuota: al aplicarlo
+          // o sacarlo hay que rehacer el monto sugerido, no arrastrar el anterior.
+          key={`${payMethodPayment.id}:${payMethodPayment.discountAmount}`}
           payment={payMethodPayment}
           period={period}
           methodConfigs={methodConfigs}
           lateFee={payMethodLateFee}
           busy={updatingId === payMethodPayment.id}
           onCancel={() => setPayMethodForId(null)}
+          togglingDiscount={togglingDiscountId === payMethodPayment.id}
+          onToggleDiscount={(apply) => handleToggleDiscount(payMethodPayment.id, apply)}
           onConfirm={({ method, lateFeeWaived, chargedAmount, reason }) =>
             handleMarkPaid(payMethodPayment.id, method, lateFeeWaived, chargedAmount, reason)
           }

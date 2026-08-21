@@ -3,6 +3,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 vi.mock("@/lib/db", () => import("./mocks/db"))
 
 import {
+  assignmentBelongsToStudent,
+  discountBelongsToGym,
   gymBelongsToOwner,
   gymBelongsToReceptionist,
   gymBelongsToUser,
@@ -73,5 +75,30 @@ describe("gymBelongsToOwner sigue siendo estricto", () => {
     await expect(gymBelongsToOwner(IDS.gym1, IDS.ownerUser1)).resolves.toBe(true)
     await expect(gymBelongsToOwner(IDS.gym1, IDS.receptionistUser1)).resolves.toBe(false)
     await expect(gymBelongsToOwner(IDS.gym1, IDS.trainerUser1)).resolves.toBe(false)
+  })
+})
+
+describe("discountBelongsToGym", () => {
+  it("acepta el descuento de ese gimnasio", async () => {
+    await expect(discountBelongsToGym(IDS.discount1, IDS.gym1)).resolves.toBe(true)
+  })
+
+  it("rechaza el descuento del otro gimnasio, aunque el owner fuera el mismo", async () => {
+    await expect(discountBelongsToGym(IDS.discount2, IDS.gym1)).resolves.toBe(false)
+    await expect(discountBelongsToGym(IDS.discount1, IDS.gym2)).resolves.toBe(false)
+  })
+
+  it("rechaza un descuento inexistente", async () => {
+    await expect(discountBelongsToGym("descuento-fantasma", IDS.gym1)).resolves.toBe(false)
+  })
+})
+
+describe("assignmentBelongsToStudent", () => {
+  it("acepta la asignación de ese alumno", async () => {
+    await expect(assignmentBelongsToStudent(IDS.assignment1, IDS.student1)).resolves.toBe(true)
+  })
+
+  it("rechaza la asignación de otro alumno", async () => {
+    await expect(assignmentBelongsToStudent(IDS.assignment1, IDS.student2)).resolves.toBe(false)
   })
 })

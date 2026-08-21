@@ -18,6 +18,8 @@
 - [Schedules](#schedules)
 - [Expenses](#expenses)
 - [Payments](#payments)
+- [Discounts (descuentos)](#discounts-descuentos)
+- [Student Discounts (asignaciones)](#student-discounts-asignaciones)
 - [Late Fee (recargo por mora)](#late-fee-recargo-por-mora)
 - [Cash Closings (cierres de caja)](#cash-closings-cierres-de-caja)
 - [Metrics](#metrics)
@@ -794,6 +796,14 @@ Cada entrada de `schedules`:
 | `lateFeeWaived` | boolean | No (condona el recargo por mora de esta cuota) |
 | `chargedAmount` | number \| null | No (monto que se cobro de verdad; `null` borra el ajuste manual) |
 | `manualAdjustmentReason` | string \| null | No (motivo del ajuste manual, max 200) |
+| `discountOverride` | boolean \| null | No — decision manual sobre el descuento de esa cuota |
+
+**Descuento a mano:** si el body trae `discountOverride`, el endpoint no actualiza nada mas: aplica la decision y recalcula el monto en el servidor.
+- `true` — aplicar el descuento aunque la regla lo hubiera sacado (perdonarle la mora).
+- `false` — no aplicarlo aunque corresponda.
+- `null` — volver al automatico.
+
+La decision queda guardada en la cuota, asi que sobrevive a las sincronizaciones. Devuelve `409` si la cuota ya esta cobrada (hay que desmarcarla primero) o si no tiene ningun descuento asignado.
 
 **Validaciones:**
 - No se puede modificar un pago verificado (cierre de caja ya realizado).
@@ -835,6 +845,132 @@ monto/notas.
 
 **Donde se usa:** Ningun lugar de la UI. Cancelar un cobro se hace con `PATCH status: PENDING`, que
 deja la cuota impaga en vez de borrarla; este DELETE borra el registro y queda para el owner.
+
+---
+
+## Discounts (descuentos)
+
+Los descuentos los configura el dueño y se aplican solos sobre la cuota de los alumnos que los tengan asignados, **al generarla**. De ahi sale lo que el alumno debe (`amount = listAmount - discountAmount`), que despues es el punto de partida del cobro: mora, medio de pago y ajuste manual se calculan sobre eso.
+
+Hay tres tipos:
+
+| Tipo | `value` significa | Efecto sobre una cuota de $30.000 |
+|------|-------------------|-----------------------------------|
+| `PERCENTAGE`   | porcentaje (0-100) a descontar | `20` → paga $24.000 |
+| `FIXED_AMOUNT` | monto a descontar              | `5000` → paga $25.000 |
+| `FIXED_PRICE`  | precio final de la cuota       | `18000` → paga $18.000 |
+
+El descuento nunca deja la cuota por debajo de cero ni genera recargo.
+
+Ademas, cualquiera de los tres puede marcarse con `loseOnLatePayment: true` ("solo por pago en termino"): se pierde cuando los dias de atraso de la cuota superan sus `graceDays`. Es un plazo aparte del vencimiento — la cuota figura como `EXPIRED` desde su vencimiento, pero el descuento sigue en pie mientras dure la gracia. No es definitivo: la cuota conserva el vinculo y `discountAmount` en cero, asi que si el plazo deja de estar pasado, el descuento vuelve.
+
+Esa regla es el automatico. Sobre cada cuota concreta, quien la cobra puede decidir a mano con `discountOverride` (ver `PATCH /api/payments/:id`), y esa decision le gana a la regla.
+
+### `GET /api/discounts?gymId=xxx`
+
+**Para que sirve:** Listar los descuentos del gimnasio, con la cantidad de alumnos que tiene cada uno asignado.
+
+**Roles:** `OWNER`
+
+**Retorna:** `Discount[]` con `_count.students`.
+
+**Donde se usa:** `DiscountsView.tsx` — tabla de descuentos. `StudentsView.tsx` — combo del modal de asignacion (filtra los activos).
+
+---
+
+### `POST /api/discounts`
+
+**Para que sirve:** Crear un descuento.
+
+**Roles:** `OWNER`
+
+**Recibe (body JSON):**
+| Campo         | Tipo   | Requerido |
+|---------------|--------|-----------|
+| `gymId`       | string | Si        |
+| `name`        | string | Si (unico dentro del gimnasio, max 60) |
+| `type`        | enum   | Si (`PERCENTAGE`, `FIXED_AMOUNT`, `FIXED_PRICE`) |
+| `value`       | number | Si (> 0; si es `PERCENTAGE`, <= 100) |
+| `description` | string | No (max 200) |
+| `active`      | boolean| No (default `true`) |
+| `loseOnLatePayment` | boolean | No (default `false`) — se pierde al pasar su plazo |
+| `graceDays`   | number | No (default `0`, entero 0-60) — dias de tolerancia antes de perderlo |
+
+**Retorna:** `Discount` (201 Created). `409` si ya existe uno con ese nombre en el gimnasio.
+
+---
+
+### `PATCH /api/discounts/:id?gymId=xxx`
+
+**Para que sirve:** Editar un descuento o activarlo/desactivarlo.
+
+**Roles:** `OWNER`
+
+**Recibe (body JSON):** los mismos campos que `POST`, todos opcionales (sin `gymId`).
+
+**Logica:** Un descuento con `active: false` deja de aplicarse a las cuotas nuevas y no se puede asignar, pero conserva las asignaciones y el historial.
+
+---
+
+### `DELETE /api/discounts/:id?gymId=xxx`
+
+**Para que sirve:** Eliminar un descuento y desasignarlo de todos los alumnos.
+
+**Roles:** `OWNER`
+
+**Logica:** Las asignaciones caen por cascade y, en la misma transaccion, las cuotas sin cobrar que lo tenian aplicado vuelven al precio de lista. Las cuotas pagadas no se tocan: conservan `discountName` como testimonio.
+
+**Retorna:** `204 No Content`.
+
+---
+
+## Student Discounts (asignaciones)
+
+La vigencia se expresa en periodos mensuales (`YYYY-MM`), igual que `Payment.period`. Un alumno no puede tener dos descuentos vigentes en el mismo periodo: la API rechaza vigencias solapadas.
+
+### `GET /api/students/:id/discounts?gymId=xxx`
+
+**Para que sirve:** Listar los descuentos asignados a un alumno (vigentes e historicos), de mas nuevo a mas viejo.
+
+**Roles:** `OWNER`
+
+**Retorna:** `StudentDiscount[]` con el `discount` embebido.
+
+---
+
+### `POST /api/students/:id/discounts?gymId=xxx`
+
+**Para que sirve:** Asignar un descuento al alumno.
+
+**Roles:** `OWNER`
+
+**Recibe (body JSON):**
+| Campo        | Tipo   | Requerido |
+|--------------|--------|-----------|
+| `discountId` | string | Si (tiene que ser del mismo gimnasio) |
+| `validFrom`  | string | No (`YYYY-MM`; default: mes en curso) |
+| `validUntil` | string \| null | No (`YYYY-MM`; null = sin fecha de corte) |
+| `notes`      | string | No (max 200) |
+
+**Validaciones:** `403` si el descuento es de otro gimnasio · `404` si no existe · `409` si esta desactivado · `409` si se pisa con otra vigencia del alumno · `400` si `validUntil` es anterior a `validFrom`.
+
+---
+
+### `PATCH /api/students/:id/discounts/:assignmentId?gymId=xxx`
+
+**Para que sirve:** Cambiar la vigencia o la nota de una asignacion. Mismas validaciones que el `POST`.
+
+**Roles:** `OWNER`
+
+---
+
+### `DELETE /api/students/:id/discounts/:assignmentId?gymId=xxx`
+
+**Para que sirve:** Quitarle el descuento al alumno. Las cuotas sin cobrar de los periodos que cubria vuelven al precio de lista; las pagadas no se tocan.
+
+**Roles:** `OWNER`
+
+**Retorna:** `204 No Content`.
 
 ---
 

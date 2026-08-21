@@ -14,6 +14,7 @@ import { ruledCharge } from "@/lib/charge"
 import { formatMoney, round2, signedMoney } from "@/lib/money"
 import { daysLabel, lateDaysAt } from "@/lib/late-fee"
 import { formatMonthYear as periodLabel } from "@/lib/timezone"
+import { ON_TIME_ONLY_LABEL } from "@/lib/discounts-format"
 import type { Payment } from "./types"
 
 /** Redondeos que ofrece el modal, en pesos. */
@@ -39,6 +40,9 @@ type Props = {
   busy: boolean
   onCancel: () => void
   onConfirm: (charge: Charge) => void
+  /** Aplica o saca el descuento de esta cuota; `null` vuelve al automático. */
+  onToggleDiscount: (apply: boolean | null) => void
+  togglingDiscount: boolean
 }
 
 /**
@@ -52,9 +56,14 @@ type Props = {
  * se cobra. Lo único que el modal decide de verdad es el ajuste manual: la
  * diferencia entre ese total y lo que quien cobra dice que se cobró.
  */
-export function PayPaymentModal({ payment, period, methodConfigs, lateFee, busy, onCancel, onConfirm }: Props) {
+export function PayPaymentModal({
+  payment, period, methodConfigs, lateFee, busy, onCancel, onConfirm,
+  onToggleDiscount, togglingDiscount,
+}: Props) {
   const enabledMethods = methodConfigs.filter((c) => c.enabled)
   const cuota = Number(payment.amount)
+  const discountAmount = Number(payment.discountAmount)
+  const discountApplied = discountAmount > 0
 
   /** La deuda antes del medio de pago: la cuota más la mora, si se cobra. */
   function chargeableFor(waived: boolean): number {
@@ -115,6 +124,67 @@ export function PayPaymentModal({ payment, period, methodConfigs, lateFee, busy,
             <span className="font-mono font-semibold">{formatMoney(Number(payment.amount))}</span>
           </p>
         </div>
+
+        {/* El descuento define la cuota, así que va antes de la mora, que se
+            calcula sobre ella. Quien cobra puede aplicarlo o sacarlo acá: la
+            decisión se guarda y el backend recalcula el monto. */}
+        {payment.discountName && (
+          <div className="rounded-lg border border-[#E5E4E0] bg-[#FAFAF9] px-3 py-2.5 space-y-2">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#A5A49D]">Descuento</p>
+                <p className="mt-0.5 truncate text-sm font-medium text-[#111110]">{payment.discountName}</p>
+              </div>
+              <span
+                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                  discountApplied ? "bg-emerald-100 text-emerald-700" : "bg-[#F0EFEB] text-[#68685F]"
+                }`}
+              >
+                {discountApplied ? "Aplicado" : "No aplicado"}
+              </span>
+            </div>
+
+            <p className="text-xs text-[#68685F]">
+              {discountApplied ? (
+                <>
+                  Se descuentan{" "}
+                  <span className="font-mono font-semibold text-emerald-700">{formatMoney(discountAmount)}</span>
+                  {" sobre "}{formatMoney(Number(payment.listAmount))}.
+                </>
+              ) : payment.discountOverride === false ? (
+                "Se sacó a mano en esta cuota."
+              ) : (
+                `${ON_TIME_ONLY_LABEL}: pasó el plazo para pagarlo con descuento.`
+              )}
+              {payment.discountOverride !== null && (
+                <span className="text-[#A5A49D]"> · decisión manual</span>
+              )}
+            </p>
+
+            <div className="flex flex-wrap items-center gap-2 pt-0.5">
+              <button
+                type="button"
+                onClick={() => onToggleDiscount(!discountApplied)}
+                disabled={togglingDiscount || busy}
+                className="cursor-pointer rounded-lg border border-[#E5E4E0] bg-white px-3 py-1.5 text-xs font-semibold text-[#111110] transition-colors hover:border-[#111110] hover:bg-[#F0EFEB] disabled:opacity-40"
+              >
+                {togglingDiscount
+                  ? "\u2026"
+                  : discountApplied ? "No aplicar el descuento" : "Aplicar el descuento igual"}
+              </button>
+              {payment.discountOverride !== null && (
+                <button
+                  type="button"
+                  onClick={() => onToggleDiscount(null)}
+                  disabled={togglingDiscount || busy}
+                  className="cursor-pointer text-xs font-medium text-[#68685F] underline underline-offset-2 transition-colors hover:text-[#111110] disabled:opacity-40"
+                >
+                  Volver al automático
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* La mora se suma a la cuota antes del ajuste del medio; el backend la
             recalcula al guardar, así que esto es lo que se va a cobrar. */}

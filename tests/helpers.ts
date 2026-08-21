@@ -29,12 +29,16 @@ export const IDS = {
   group1: "cgroup000000000000000001",
   payment1: "cpayment0000000000000001",
   attendance1: "cattend00000000000000001",
+  discount1: "cdiscount000000000000001",
+  discount2: "cdiscount000000000000002",
+  assignment1: "cassign00000000000000001",
 } as const
 
 /**
  * Carga el escenario base:
  *  - gym1 (ACTIVE) de owner1, con recepcionista activo, uno desactivado y un trainer
  *  - gym2 (ACTIVE) de owner2, con su propio recepcionista
+ *  - un descuento por gimnasio, el de gym1 asignado a student1
  */
 export function seedTwoGyms() {
   seed("gym", [
@@ -64,6 +68,21 @@ export function seedTwoGyms() {
   seed("group", [{ id: IDS.group1, gymId: IDS.gym1 }])
   seed("payment", [paymentRow()])
   seed("attendance", [{ id: IDS.attendance1, gymId: IDS.gym1, groupId: IDS.group1 }])
+
+  seed("discount", [
+    { id: IDS.discount1, gymId: IDS.gym1, name: "Hermanos", type: "PERCENTAGE", value: 20, active: true },
+    { id: IDS.discount2, gymId: IDS.gym2, name: "Beca", type: "FIXED_PRICE", value: 10000, active: true },
+  ])
+
+  seed("studentDiscount", [
+    {
+      id: IDS.assignment1,
+      studentId: IDS.student1,
+      discountId: IDS.discount1,
+      validFrom: new Date(Date.UTC(2026, 0, 1)),
+      validUntil: null,
+    },
+  ])
 }
 
 /** Período del pago del fixture y día de vencimiento del alumno. */
@@ -86,6 +105,7 @@ export function paymentRow(overrides: Record<string, unknown> = {}) {
     verified: false,
     status: "PENDING",
     amount: "10000",
+    listAmount: 30000,
     baseAmount: null,
     methodAdjustment: null,
     lateFee: null,
