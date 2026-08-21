@@ -162,8 +162,16 @@ sin esperar a la próxima sincronización, para que nadie cobre un descuento que
 el descuento a un alumno hace lo mismo, acotado a él y a los períodos de esa vigencia. `active: false`
 es la alternativa cuando se quiere retirar de las cuotas nuevas conservando asignaciones e historial.
 
-El cálculo vive aislado en `modules/discounts/discounts.calc.ts` (funciones puras, sin DB) para
-poder testearlo sin montar un escenario entero.
+El cálculo vive aislado en `modules/discounts/discounts.calc.ts`: funciones puras, sin DB y sin el
+cliente de Prisma, así lo importan por igual los servicios y las vistas (que previsualizan el monto
+antes de guardar) y no hay dos versiones de la misma cuenta. `effectiveDiscountAmount` es el único
+lugar donde se decide cuánto se descuenta: los tres caminos que tocan el monto —generar la cuota,
+recalcularla al vencer y la decisión manual— pasan por ahí, así no pueden discrepar.
+
+La decisión manual vale para el descuento sobre el que se tomó: si el descuento aplicable cambia, la
+cuota vuelve al automático en vez de arrastrar un criterio que era sobre otra cosa. Y `Payment.amount`
+es derivado (`baseAmount - discountAmount`), por eso el endpoint de cuotas no acepta un `amount` del
+cliente.
 
 ### Enums (in schema.prisma)
 - `UserRole`: `ADMIN | OWNER | TRAINER | RECEPTIONIST`
@@ -196,7 +204,9 @@ Lo que sí se mockea: `@/lib/auth` (la sesión), `@/lib/logger` y los servicios 
 | `tests/guards.test.ts` | `requireGymRole` y su fallback por rol |
 | `tests/receptionists.service.test.ts` | Alta transaccional, email duplicado, hash de contraseña, borrado por cascade |
 | `tests/discounts.calc.test.ts` | El cálculo del descuento: los tres tipos, los topes (nunca negativo, nunca recargo), vigencias y solapamientos |
-| `tests/discounts.service.test.ts` | Qué pasa al borrar/desasignar un descuento: las cuotas sin cobrar vuelven al precio de lista, las pagadas no se tocan |
+| `tests/discounts.schema.test.ts` | Lo que la API acepta y lo que no: tope del 100% solo para porcentajes, decimales, días de gracia, formato del período |
+| `tests/discounts.service.test.ts` | Borrar/desasignar un descuento (las cuotas sin cobrar vuelven al precio de lista, las pagadas no se tocan) y la validación de vigencias al asignarlo |
+| `tests/payments.sync.test.ts` | Generar y recalcular las cuotas del mes: base + descuento, plazos de gracia, resincronización, y que la decisión manual no se pise |
 | `tests/payments.calc.test.ts` | La fecha de vencimiento de la cuota (tope de mes, bisiestos) y de la que dependen los descuentos por mora |
 | `tests/payments.service.test.ts` | La decisión manual del descuento sobre una cuota: aplicar, sacar, volver al automático, y qué se rechaza |
 

@@ -11,9 +11,12 @@ export const updatePaymentSchema = z.object({
   paymentMethod: z.nativeEnum(PaymentMethod).nullable().optional(),
   paidAt: z.string().datetime().nullable().optional(),
   notes: z.string().nullable().optional(),
-  amount: z.number().positive().multipleOf(0.01).optional(),
   /** Decisión manual sobre el descuento: true = aplicar, false = no aplicar,
-   *  null = volver al automático. El monto lo recalcula el servidor. */
+   *  null = volver al automático. El monto lo recalcula el servidor.
+   *
+   *  `amount` no se acepta a propósito: desde que hay descuentos es un valor
+   *  derivado (`baseAmount - discountAmount`), y dejar que el cliente lo fije
+   *  rompía esa relación en silencio hasta la próxima sincronización. */
   discountOverride: z.boolean().nullable().optional(),
 })
 

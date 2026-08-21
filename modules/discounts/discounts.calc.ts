@@ -1,4 +1,11 @@
-import { DiscountType } from "@/app/generated/prisma/client"
+/**
+ * Cálculo puro del descuento: sin DB y sin el cliente de Prisma, así lo pueden
+ * usar por igual los servicios y las vistas (que necesitan previsualizar el
+ * monto antes de guardar nada). El tipo se declara como unión de strings en vez
+ * de importar el enum generado justamente para no arrastrar Prisma al browser;
+ * los valores de `Discount.type` encajan sin conversión.
+ */
+export type DiscountType = "PERCENTAGE" | "FIXED_AMOUNT" | "FIXED_PRICE"
 
 /** Un descuento reducido a lo que hace falta para calcular. */
 export type DiscountRule = {
@@ -31,8 +38,8 @@ export function computeDiscountAmount(baseAmount: number, rule: Pick<DiscountRul
   if (baseAmount <= 0) return 0
 
   const raw =
-    rule.type === DiscountType.PERCENTAGE ? (baseAmount * rule.value) / 100
-    : rule.type === DiscountType.FIXED_AMOUNT ? rule.value
+    rule.type === "PERCENTAGE" ? (baseAmount * rule.value) / 100
+    : rule.type === "FIXED_AMOUNT" ? rule.value
     : baseAmount - rule.value // FIXED_PRICE: `value` es el precio final
 
   return round2(Math.min(Math.max(raw, 0), baseAmount))
@@ -52,6 +59,25 @@ export function discountApplies(
   pastDeadline: boolean,
 ): boolean {
   return !(rule.loseOnLatePayment && pastDeadline)
+}
+
+/**
+ * Cuánto se descuenta finalmente sobre la cuota, que es la única pregunta que
+ * importa al cobrar. Junta las dos decisiones en el orden correcto:
+ *
+ *   1. si hay decisión manual del operario (`override`), manda esa;
+ *   2. si no, manda la regla del descuento (plazo de pago en término).
+ *
+ * Los tres caminos que tocan el monto de una cuota —generarla, recalcularla al
+ * vencer y la decisión manual— pasan por acá, así no pueden discrepar entre sí.
+ */
+export function effectiveDiscountAmount(
+  baseAmount: number,
+  rule: Pick<DiscountRule, "type" | "value" | "loseOnLatePayment">,
+  { pastDeadline, override }: { pastDeadline: boolean; override: boolean | null },
+): number {
+  const applies = override ?? discountApplies(rule, pastDeadline)
+  return applies ? computeDiscountAmount(baseAmount, rule) : 0
 }
 
 /** Vigencias expresadas en períodos mensuales; `until` null = sin fecha de corte. */

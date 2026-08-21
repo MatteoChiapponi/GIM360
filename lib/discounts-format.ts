@@ -1,10 +1,12 @@
 /**
  * Etiquetas y formato de descuentos, compartidos por las vistas de Descuentos,
- * Alumnos y Cuotas. El tipo se declara acá como unión de strings (y no se
- * importa de Prisma) para no arrastrar el cliente generado a un componente
- * cliente, igual que hacen las demás vistas con sus enums.
+ * Alumnos y Cuotas. El cálculo no vive acá: es el mismo `computeDiscountAmount`
+ * que usa el backend, que no depende de Prisma justamente para poder usarse en
+ * las dos puntas y no tener dos versiones de la misma cuenta.
  */
-export type DiscountType = "PERCENTAGE" | "FIXED_AMOUNT" | "FIXED_PRICE"
+import type { DiscountType } from "@/modules/discounts/discounts.calc"
+
+export type { DiscountType }
 
 export const DISCOUNT_TYPE_LABEL: Record<DiscountType, string> = {
   PERCENTAGE: "Porcentaje",
@@ -27,19 +29,6 @@ export function formatDiscountValue(type: DiscountType, value: string | number):
   if (type === "PERCENTAGE") return `${Number(value)}%`
   if (type === "FIXED_AMOUNT") return `−${formatMoney(value)}`
   return `${formatMoney(value)} fijo`
-}
-
-/**
- * Cuánto se descuenta sobre `base`. Es el mismo cálculo que hace el backend al
- * generar la cuota; acá solo sirve para previsualizar antes de asignar.
- */
-export function previewDiscountAmount(base: number, type: DiscountType, value: number): number {
-  if (base <= 0) return 0
-  const raw =
-    type === "PERCENTAGE" ? (base * value) / 100
-    : type === "FIXED_AMOUNT" ? value
-    : base - value
-  return Math.round(Math.min(Math.max(raw, 0), base) * 100) / 100
 }
 
 /** Leyenda del descuento que se pierde por mora, usada en las tres vistas. */

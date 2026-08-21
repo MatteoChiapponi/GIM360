@@ -75,7 +75,13 @@ export function seedTwoGyms() {
   ])
 
   seed("studentDiscount", [
-    { id: IDS.assignment1, studentId: IDS.student1, discountId: IDS.discount1 },
+    {
+      id: IDS.assignment1,
+      studentId: IDS.student1,
+      discountId: IDS.discount1,
+      validFrom: new Date(Date.UTC(2026, 0, 1)),
+      validUntil: null,
+    },
   ])
 }
 

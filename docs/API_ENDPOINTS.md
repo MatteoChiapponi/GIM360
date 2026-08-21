@@ -791,8 +791,9 @@ Cada entrada de `schedules`:
 | `paymentMethod` | enum   | No (requerido si status=PAID). `CASH`, `TRANSFER`, `CARD`, `OTHER` |
 | `paidAt`        | datetime | No |
 | `notes`         | string | No |
-| `amount`        | number | No |
 | `discountOverride` | boolean \| null | No — decision manual sobre el descuento de esa cuota |
+
+`amount` no se acepta: desde que hay descuentos es un valor derivado (`baseAmount - discountAmount`) y lo calcula el servidor.
 
 **Descuento a mano:** si el body trae `discountOverride`, el endpoint no actualiza nada mas: aplica la decision y recalcula el monto en el servidor.
 - `true` — aplicar el descuento aunque la regla lo hubiera sacado (perdonarle la mora).

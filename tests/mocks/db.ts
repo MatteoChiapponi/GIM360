@@ -50,6 +50,7 @@ function table(rows: Row[] = []) {
       where ? state.rows.filter((r) => matchesWhere(r, where)) : state.rows,
     ),
     create: vi.fn(),
+    createMany: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
     deleteMany: vi.fn(),

@@ -1,6 +1,6 @@
 import { db } from "@/lib/db"
 import { parsePeriod } from "@/lib/period"
-import { computeDiscountAmount, discountApplies, resolveApplicableDiscount, round2 } from "@/modules/discounts/discounts.calc"
+import { effectiveDiscountAmount, resolveApplicableDiscount, round2 } from "@/modules/discounts/discounts.calc"
 import { dueDateFor, pastDiscountDeadline } from "./payments.calc"
 import { getAssignmentsForStudents } from "@/modules/discounts/discounts.service"
 import type { PaymentMethod } from "@/app/generated/prisma/client"
@@ -16,7 +16,16 @@ type ExpectedCharge = {
   discountAmount: number
   discountId: string | null
   discountName: string | null
+  discountOverride: boolean | null
 }
+
+/** Lo que la cuota ya tiene decidido sobre su descuento, para no pisarlo. */
+type StoredDecision = {
+  discountId: string | null
+  discountOverride: boolean | null
+}
+
+const NO_DECISION: StoredDecision = { discountId: null, discountOverride: null }
 
 const paymentWithStudent = {
   include: {
@@ -55,15 +64,15 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
   const assignments = await getAssignmentsForStudents(students.map((s) => s.id))
   const now = new Date()
 
-  /** Cuánto le toca pagar a este alumno, respetando la decisión manual que
-   *  tenga la cuota (`override`) por encima de la regla automática. */
-  const chargeForStudent = (student: (typeof students)[number], override: boolean | null) =>
+  /** Cuánto le toca pagar a este alumno, respetando lo que la cuota ya tenga
+   *  decidido a mano por encima de la regla automática. */
+  const chargeForStudent = (student: (typeof students)[number], stored: StoredDecision) =>
     chargeFor(
       student.groups.reduce((sum, sg) => sum + Number(sg.group.monthlyPrice), 0),
       assignments.filter((a) => a.studentId === student.id),
       periodDate,
       (graceDays: number) => pastDiscountDeadline(period, student.dueDay, graceDays, now),
-      override,
+      stored,
     )
 
   const studentsById = new Map(students.map((student) => [student.id, student]))
@@ -71,7 +80,7 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
     gymId,
     studentId: student.id,
     period: periodDate,
-    ...chargeForStudent(student, null),
+    ...chargeForStudent(student, NO_DECISION),
   }))
 
   // 1. Create payments for students that don't have one yet
@@ -95,7 +104,7 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
       continue
     }
 
-    const charge = chargeForStudent(student, payment.discountOverride)
+    const charge = chargeForStudent(student, payment)
     if (isStale(payment, charge)) {
       // Cambió la inscripción a grupos o el descuento → actualizar montos
       updates.push(db.payment.update({ where: { id: payment.id }, data: charge }))
@@ -118,9 +127,9 @@ export async function generateMonthlyPayments(gymId: string, period: string) {
 /**
  * Aplica al precio base el descuento vigente del alumno, si tiene alguno.
  *
- * Quién decide: si la cuota trae una decisión manual (`override`), manda esa —
- * el operario puede perdonar la mora o sacar el descuento a mano. Si no, manda
- * la regla: los descuentos de "pago en término" no valen sobre una cuota vencida.
+ * Quién decide: si la cuota trae una decisión manual, manda esa — el operario
+ * puede perdonar la mora o sacar el descuento a mano. Si no, manda la regla del
+ * descuento (plazo de pago en término).
  */
 function chargeFor(
   groupsTotal: number,
@@ -129,7 +138,7 @@ function chargeFor(
   /** El plazo depende de los días de gracia del descuento, que recién se
    *  conocen una vez resuelto cuál corresponde. */
   isPastDeadline: (graceDays: number) => boolean,
-  override: boolean | null,
+  stored: StoredDecision,
 ): ExpectedCharge {
   const baseAmount = round2(groupsTotal)
   const applicable = resolveApplicableDiscount(
@@ -141,15 +150,24 @@ function chargeFor(
   )
 
   if (!applicable) {
-    return { baseAmount, amount: baseAmount, discountAmount: 0, discountId: null, discountName: null }
+    return {
+      baseAmount, amount: baseAmount, discountAmount: 0,
+      discountId: null, discountName: null, discountOverride: null,
+    }
   }
 
+  // La decisión manual se tomó sobre un descuento concreto. Si el aplicable pasó
+  // a ser otro, la cuota vuelve al automático en vez de arrastrar a ciegas un
+  // criterio que era sobre otra cosa.
+  const override = stored.discountId === applicable.discount.id ? stored.discountOverride : null
+
   // El descuento que no se aplica conserva el vínculo con `discountAmount` en
-  // cero: así la vista puede decir cuál se perdió, y si la cuota deja de estar
-  // vencida se recalcula sola contra la asignación, que sigue intacta.
-  const discountAmount = (override ?? discountApplies(applicable.discount, isPastDeadline(applicable.discount.graceDays)))
-    ? computeDiscountAmount(baseAmount, applicable.discount)
-    : 0
+  // cero: así la vista puede decir cuál se perdió, y si el plazo deja de estar
+  // pasado se recalcula solo contra la asignación, que sigue intacta.
+  const discountAmount = effectiveDiscountAmount(baseAmount, applicable.discount, {
+    pastDeadline: isPastDeadline(applicable.discount.graceDays),
+    override,
+  })
 
   return {
     baseAmount,
@@ -157,19 +175,25 @@ function chargeFor(
     discountAmount,
     discountId: applicable.discount.id,
     discountName: applicable.discount.name,
+    discountOverride: override,
   }
 }
 
 /** ¿La cuota guardada dejó de coincidir con lo que corresponde cobrar hoy? */
 function isStale(
-  payment: { baseAmount: unknown; amount: unknown; discountAmount: unknown; discountId: string | null },
+  payment: {
+    baseAmount: unknown; amount: unknown; discountAmount: unknown
+    discountId: string | null; discountName: string | null; discountOverride: boolean | null
+  },
   charge: ExpectedCharge,
 ): boolean {
   return (
     Number(payment.baseAmount) !== charge.baseAmount ||
     Number(payment.amount) !== charge.amount ||
     Number(payment.discountAmount) !== charge.discountAmount ||
-    (payment.discountId ?? null) !== charge.discountId
+    (payment.discountId ?? null) !== charge.discountId ||
+    (payment.discountName ?? null) !== charge.discountName ||
+    (payment.discountOverride ?? null) !== charge.discountOverride
   )
 }
 
@@ -204,10 +228,14 @@ export async function expireOverduePayments(gymId: string, period: string) {
 
     if (payment.discount?.loseOnLatePayment) {
       const baseAmount = Number(payment.baseAmount)
-      const pastDeadline = pastDiscountDeadline(period, payment.student.dueDay, payment.discount.graceDays, now)
-      const discountAmount = (payment.discountOverride ?? discountApplies(payment.discount, pastDeadline))
-        ? computeDiscountAmount(baseAmount, { ...payment.discount, value: Number(payment.discount.value) })
-        : 0
+      const discountAmount = effectiveDiscountAmount(
+        baseAmount,
+        { ...payment.discount, value: Number(payment.discount.value) },
+        {
+          pastDeadline: pastDiscountDeadline(period, payment.student.dueDay, payment.discount.graceDays, now),
+          override: payment.discountOverride,
+        },
+      )
 
       if (Number(payment.discountAmount) !== discountAmount) {
         data.discountAmount = discountAmount
@@ -276,15 +304,18 @@ export async function setDiscountOverride(id: string, override: boolean | null) 
   if (!payment.discount) throw new Error("PAYMENT_WITHOUT_DISCOUNT")
 
   const baseAmount = Number(payment.baseAmount)
-  const pastDeadline = pastDiscountDeadline(
-    payment.period.toISOString().slice(0, 7),
-    payment.student.dueDay,
-    payment.discount.graceDays,
+  const discountAmount = effectiveDiscountAmount(
+    baseAmount,
+    { ...payment.discount, value: Number(payment.discount.value) },
+    {
+      pastDeadline: pastDiscountDeadline(
+        payment.period.toISOString().slice(0, 7),
+        payment.student.dueDay,
+        payment.discount.graceDays,
+      ),
+      override,
+    },
   )
-  const applies = override ?? discountApplies(payment.discount, pastDeadline)
-  const discountAmount = applies
-    ? computeDiscountAmount(baseAmount, { ...payment.discount, value: Number(payment.discount.value) })
-    : 0
 
   return db.payment.update({
     where: { id },

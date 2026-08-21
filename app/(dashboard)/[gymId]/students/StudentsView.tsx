@@ -17,8 +17,9 @@ import { FormModal } from "@/components/ui/FormModal"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 import {
   DISCOUNT_TYPE_LABEL, ON_TIME_ONLY_LABEL, formatDiscountValue, formatGracePeriod, formatMoney,
-  previewDiscountAmount, type DiscountType,
+  type DiscountType,
 } from "@/lib/discounts-format"
+import { computeDiscountAmount } from "@/modules/discounts/discounts.calc"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -931,7 +932,10 @@ export default function StudentsView({ gymId, canManageDiscounts = false }: { gy
                           {assignments.map((a) => {
                             const vigente = isCurrentlyValid(a)
                             const base = selectedDetail.groups.reduce((sum, eg) => sum + Number(eg.group.monthlyPrice), 0)
-                            const descuento = previewDiscountAmount(base, a.discount.type, Number(a.discount.value))
+                            const descuento = computeDiscountAmount(base, {
+                              type: a.discount.type,
+                              value: Number(a.discount.value),
+                            })
                             return (
                               <div
                                 key={a.id}
