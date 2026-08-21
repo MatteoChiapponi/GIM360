@@ -1,5 +1,6 @@
 import { db } from "@/lib/db"
-import { currentPeriod, parsePeriod } from "@/lib/period"
+import { parsePeriod } from "@/lib/period"
+import { currentPeriod } from "@/lib/timezone"
 import { rangesOverlap } from "./discounts.calc"
 import type { AssignDiscountInput, CreateDiscountInput, UpdateAssignmentInput, UpdateDiscountInput } from "./discounts.schema"
 
@@ -60,14 +61,14 @@ export async function deleteDiscount(id: string) {
  *  tanto el cliente como el `tx` de una transacción. */
 type PaymentWriter = {
   payment: {
-    findMany: (args: { where: Record<string, unknown> }) => Promise<{ id: string; baseAmount: unknown }[]>
+    findMany: (args: { where: Record<string, unknown> }) => Promise<{ id: string; listAmount: unknown }[]>
     update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>
   }
 }
 
 /**
  * Devuelve al precio de lista las cuotas sin cobrar que tenían este descuento.
- * `amount` vuelve a `baseAmount` fila por fila — un `updateMany` no puede copiar
+ * `amount` vuelve a `listAmount` fila por fila — un `updateMany` no puede copiar
  * el valor de otra columna.
  */
 async function revertUnpaidPayments(
@@ -83,7 +84,7 @@ async function revertUnpaidPayments(
       tx.payment.update({
         where: { id: payment.id },
         data: {
-          amount: payment.baseAmount,
+          amount: payment.listAmount,
           discountAmount: 0,
           discountId: null,
           discountName: null,
@@ -147,7 +148,7 @@ export async function assignDiscountToStudent(studentId: string, data: AssignDis
   if (!discount) throw new Error("DISCOUNT_NOT_FOUND")
   if (!discount.active) throw new Error("DISCOUNT_INACTIVE")
 
-  const validFrom = data.validFrom ? parsePeriod(data.validFrom) : currentPeriod()
+  const validFrom = parsePeriod(data.validFrom ?? currentPeriod())
   const validUntil = data.validUntil ? parsePeriod(data.validUntil) : null
 
   await assertValidRange(studentId, validFrom, validUntil)

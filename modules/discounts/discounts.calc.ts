@@ -5,6 +5,8 @@
  * de importar el enum generado justamente para no arrastrar Prisma al browser;
  * los valores de `Discount.type` encajan sin conversión.
  */
+import { round2 } from "@/lib/money"
+
 export type DiscountType = "PERCENTAGE" | "FIXED_AMOUNT" | "FIXED_PRICE"
 
 /** Un descuento reducido a lo que hace falta para calcular. */
@@ -22,11 +24,6 @@ export type DiscountAssignment = {
   validFrom: Date
   validUntil: Date | null
   discount: DiscountRule & { active: boolean }
-}
-
-/** Redondea a 2 decimales sin arrastrar el error del punto flotante. */
-export function round2(n: number): number {
-  return Math.round(n * 100) / 100
 }
 
 /**

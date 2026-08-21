@@ -74,6 +74,8 @@ async function main() {
   await db.trainer.deleteMany({ where: { gymId: gym.id } })
   await db.group.deleteMany({ where: { gymId: gym.id } })
   await db.fixedExpense.deleteMany({ where: { gymId: gym.id } })
+  await db.paymentMethodConfig.deleteMany({ where: { gymId: gym.id } })
+  await db.lateFeeConfig.deleteMany({ where: { gymId: gym.id } })
   // Borrar el User arrastra al Receptionist por cascade
   await db.user.deleteMany({ where: { receptionist: { gymId: gym.id } } })
 
@@ -105,6 +107,35 @@ async function main() {
   })
 
   console.log("Fixed expenses: $180.000/mes")
+
+  // ── Payment methods ────────────────────────────────────────────────────────
+
+  await db.paymentMethodConfig.createMany({
+    data: [
+      { gymId: gym.id, method: "CASH", enabled: true, adjustmentType: "DISCOUNT", adjustmentPercent: 5 },
+      { gymId: gym.id, method: "TRANSFER", enabled: true },
+      { gymId: gym.id, method: "CARD", enabled: true, adjustmentType: "SURCHARGE", adjustmentPercent: 10 },
+    ],
+  })
+
+  console.log("Payment methods: efectivo -5%, transferencia sin ajuste, tarjeta +10%")
+
+  // ── Late fee ───────────────────────────────────────────────────────────────
+
+  await db.lateFeeConfig.create({
+    data: {
+      gymId: gym.id,
+      enabled: true,
+      graceDays: 5,
+      feeType: "PERCENT",
+      feeValue: 5,
+      repeatEveryDays: 7,
+      maxCharges: 4,
+      maxFeeAmount: 6000,
+    },
+  })
+
+  console.log("Mora: 5% cada 7 días a partir del día 5, máximo 4 veces y tope $6.000")
 
   // ── Groups ─────────────────────────────────────────────────────────────────
 
@@ -423,7 +454,7 @@ async function main() {
           gymId: gym.id,
           studentId: student.id,
           period,
-          baseAmount: monthlyAmounts[student.id],
+          listAmount: monthlyAmounts[student.id],
           amount: monthlyAmounts[student.id],
           status: entry.status,
           paidAt: entry.paidAt,
@@ -758,7 +789,7 @@ async function main() {
         gymId: gym2.id,
         studentId: student.id,
         period: firstOfMonth(2026, 3),
-        baseAmount: monthlyAmounts2[student.id],
+        listAmount: monthlyAmounts2[student.id],
         amount: monthlyAmounts2[student.id],
         status: entry.status,
         paidAt: entry.paidAt,

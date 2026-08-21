@@ -5,6 +5,7 @@ vi.mock("@/lib/db", () => import("./mocks/db"))
 import { db, seed } from "./mocks/db"
 import { setDiscountOverride } from "@/modules/payments/payments.service"
 import { IDS } from "./helpers"
+import { argentinaDate } from "@/lib/timezone"
 
 // La decisión manual del operario sobre el descuento de una cuota puntual.
 // El monto siempre lo recalcula el servidor: nunca llega desde el cliente.
@@ -24,7 +25,7 @@ function seedPayment(overrides: PaymentOverrides = {}) {
     gymId: IDS.gym1,
     studentId: IDS.student1,
     period: LONG_OVERDUE,
-    baseAmount: 30000,
+    listAmount: 30000,
     amount: 30000,
     discountAmount: 0,
     discountId: IDS.discount1,
@@ -130,7 +131,7 @@ describe("setDiscountOverride con días de gracia", () => {
   afterEach(() => vi.useRealTimers())
 
   it("dentro de la gracia el descuento sigue en pie, aunque la cuota figure vencida", async () => {
-    seedWithGrace(new Date(2026, 2, 14, 12, 0, 0))
+    seedWithGrace(argentinaDate(2026, 3, 14, 12))
 
     await setDiscountOverride(PAYMENT_ID, null)
 
@@ -138,7 +139,7 @@ describe("setDiscountOverride con días de gracia", () => {
   })
 
   it("pasada la gracia se cae", async () => {
-    seedWithGrace(new Date(2026, 2, 16, 0, 1, 0))
+    seedWithGrace(argentinaDate(2026, 3, 16, 0, 1))
 
     await setDiscountOverride(PAYMENT_ID, null)
 
@@ -146,7 +147,7 @@ describe("setDiscountOverride con días de gracia", () => {
   })
 
   it("el operario lo puede aplicar igual después de la gracia", async () => {
-    seedWithGrace(new Date(2026, 2, 20))
+    seedWithGrace(argentinaDate(2026, 3, 20))
 
     await setDiscountOverride(PAYMENT_ID, true)
 

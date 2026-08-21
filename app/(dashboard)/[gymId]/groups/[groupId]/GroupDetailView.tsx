@@ -13,6 +13,7 @@ import { Tabs } from "@/components/ui/Tabs"
 import { DataTable } from "@/components/ui/DataTable"
 import { Skeleton } from "@/components/ui/Skeleton"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
+import { currentPeriod, formatDate, fromISODate } from "@/lib/timezone"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -332,7 +333,7 @@ function InfoTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
         weekDays: newData.weekDays,
         startTime: newData.startTime,
         endTime: newData.endTime,
-        startDate: new Date(newData.startDate).toISOString(),
+        startDate: fromISODate(newData.startDate).toISOString(),
       }),
     })
 
@@ -441,7 +442,7 @@ function InfoTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
     setScheduleSubmitting(true)
     const res = await fetch(`/api/schedules?gymId=${gymId}`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupId, weekDays: scheduleForm.weekDays, startTime: scheduleForm.startTime, endTime: scheduleForm.endTime, startDate: new Date(scheduleForm.startDate).toISOString() }),
+      body: JSON.stringify({ groupId, weekDays: scheduleForm.weekDays, startTime: scheduleForm.startTime, endTime: scheduleForm.endTime, startDate: fromISODate(scheduleForm.startDate).toISOString() }),
     })
     if (res.ok) { setScheduleForm(EMPTY_SCHEDULE); setShowScheduleForm(false); await onRefresh() }
     else { const d = await res.json().catch(() => ({})); setScheduleFormError(d?.error ?? "Error al agregar el horario.") }
@@ -514,7 +515,7 @@ function InfoTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
                         ))}
                       </div>
                       <p className="text-sm text-[#111110] font-medium">{s.startTime} – {s.endTime}</p>
-                      <p className="text-xs text-[#A5A49D]">Desde {new Date(s.startDate).toLocaleDateString("es-AR")}</p>
+                      <p className="text-xs text-[#A5A49D]">Desde {formatDate(s.startDate)}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <Button onClick={() => startEditSchedule(s)}>Editar</Button>
@@ -720,8 +721,7 @@ function StudentsTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
   // Fetch payment status for current period to count paid students in this group
   useEffect(() => {
     const controller = new AbortController()
-    const now = new Date()
-    const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+    const period = currentPeriod()
     fetch(`/api/payments?gymId=${gymId}&period=${period}`, { signal: controller.signal })
       .then((r) => r.ok ? r.json() : [])
       .then((payments: { studentId: string; status: string }[]) => {
@@ -840,7 +840,7 @@ function StudentsTab({ group, gymId, groupId, onRefresh }: SubTabProps) {
       <DataTable
         columns={[
           { key: "name", header: "Alumno", render: (e: EnrolledStudent) => <span className="font-medium text-[#111110]">{e.student.firstName} {e.student.lastName}</span> },
-          { key: "enrolledAt", header: "Inscripto el", render: (e: EnrolledStudent) => <span className="text-[#68685F]">{new Date(e.enrolledAt).toLocaleDateString("es-AR")}</span> },
+          { key: "enrolledAt", header: "Inscripto el", render: (e: EnrolledStudent) => <span className="text-[#68685F]">{formatDate(e.enrolledAt)}</span> },
           { key: "actions", header: "", align: "right" as const, render: (e: EnrolledStudent) => (
             <Button variant="danger" onClick={() => setConfirmStudentId(e.student.id)} disabled={unenrollingId === e.student.id}>
               {unenrollingId === e.student.id ? "…" : "Desinscribir"}

@@ -9,25 +9,27 @@ import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
 import { Button } from "@/components/ui/Button"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
-import { formatMoney, ON_TIME_ONLY_LABEL } from "@/lib/discounts-format"
+import {
+  PAYMENT_METHOD_VALUES,
+  PAYMENT_METHOD_LABEL as METHOD_LABEL,
+  defaultPaymentMethodConfig,
+  type PaymentMethodConfig,
+  type PaymentMethodValue as PaymentMethod,
+} from "@/lib/payment-methods"
+import { formatMoney, signedMoney } from "@/lib/money"
+import { ON_TIME_ONLY_LABEL } from "@/lib/discounts-format"
+import {
+  DEFAULT_LATE_FEE_CONFIG,
+  computeLateFee,
+  daysLabel,
+  dueDateFor,
+  lateDaysAt,
+  type LateFeeConfig,
+} from "@/lib/late-fee"
+import { currentPeriod, formatDate, formatMonthYear, toPeriod } from "@/lib/timezone"
+import { PayPaymentModal } from "./PayPaymentModal"
 
-type PaymentStatus = "PENDING" | "PAID" | "EXPIRED"
-type PaymentMethod = "CASH" | "TRANSFER" | "CARD"
-
-type Payment = {
-  id: string
-  baseAmount: string
-  amount: string
-  discountAmount: string
-  discountName: string | null
-  discountOverride: boolean | null
-  status: PaymentStatus
-  paidAt: string | null
-  paymentMethod: PaymentMethod | null
-  verified: boolean
-  cashClosingId: string | null
-  student: { id: string; firstName: string; lastName: string; dueDay: number; phone1: string }
-}
+import type { Payment, PaymentStatus } from "./types"
 
 type ClosingReport = {
   totalCollected: string
@@ -38,6 +40,8 @@ type ClosingReport = {
   transferTotal: string
   cardCount: number
   cardTotal: string
+  adjustmentsCount: number
+  adjustmentsTotal: string
   fromDate: string
   toDate: string
 }
@@ -46,66 +50,69 @@ const STATUS_LABEL: Record<PaymentStatus, string> = { PAID: "Pagado", PENDING: "
 const STATUS_DOT: Record<PaymentStatus, string> = { PAID: "bg-emerald-500", PENDING: "bg-amber-400", EXPIRED: "bg-red-500" }
 const STATUS_TEXT: Record<PaymentStatus, string> = { PAID: "text-emerald-700", PENDING: "text-amber-700", EXPIRED: "text-red-700" }
 
-const METHOD_LABEL: Record<PaymentMethod, string> = {
-  CASH: "Efectivo",
-  TRANSFER: "Transferencia",
-  CARD: "Tarjeta",
+/**
+ * Desglose del cierre por medio de pago. `CashClosing` guarda un par de columnas
+ * fijas por medio, así que este mapeo es el único lugar a tocar si algún día se
+ * suman medios nuevos.
+ */
+function closingBreakdown(report: ClosingReport): { method: PaymentMethod; count: number; total: string }[] {
+  return [
+    { method: "CASH", count: report.cashCount, total: report.cashTotal },
+    { method: "TRANSFER", count: report.transferCount, total: report.transferTotal },
+    { method: "CARD", count: report.cardCount, total: report.cardTotal },
+  ]
 }
 
-const METHOD_BUTTONS: { value: PaymentMethod; label: string }[] = [
-  { value: "CASH", label: "Efectivo" },
-  { value: "TRANSFER", label: "Transferencia" },
-  { value: "CARD", label: "Tarjeta" },
-]
-
-function dueDate(period: string, dueDay: number): Date {
-  const [year, month] = period.split("-").map(Number)
-  const lastDay = new Date(year, month, 0).getDate()
-  return new Date(year, month - 1, Math.min(dueDay, lastDay))
+/** Ajuste del medio de pago ya aplicado a un pago cobrado, para mostrarlo junto al método. */
+function paidAdjustment(p: Payment): number {
+  return p.methodAdjustment ? Number(p.methodAdjustment) : 0
 }
 
-function toYearMonth(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+/** Diferencia que se puso a mano al cobrar: redondeo, unos pesos de menos. */
+function manualAdjustment(p: Payment): number {
+  return p.manualAdjustment ? Number(p.manualAdjustment) : 0
 }
 
-function periodLabel(period: string): string {
-  const [y, m] = period.split("-").map(Number)
-  const d = new Date(y, m - 1)
-  return d.toLocaleDateString("es-AR", { month: "long", year: "numeric" })
-}
+const toYearMonth = toPeriod
+
+const periodLabel = formatMonthYear
 
 function whatsappUrl(phone: string, message: string): string {
   const clean = phone.replace(/[\s\-()]/g, "")
   return `https://api.whatsapp.com/send?phone=${encodeURIComponent(clean)}&text=${encodeURIComponent(message)}`
 }
 
-function buildWhatsAppMessage(p: Payment, period: string, gymName: string): string {
+function buildWhatsAppMessage(p: Payment, period: string, gymName: string, lateFee: number): string {
   const name = p.student.firstName
   const monto = `$${Number(p.amount).toLocaleString("es-AR")}`
   const mes = periodLabel(period)
 
   if (p.status === "EXPIRED") {
-    const due = dueDate(period, p.student.dueDay)
-    const now = new Date()
-    const daysLate = Math.floor((now.getTime() - due.getTime()) / 86400000)
-    const fechaVenc = due.toLocaleDateString("es-AR")
-    const atrasoTexto = daysLate === 1 ? "1 día de atraso" : `${daysLate} días de atraso`
+    const due = dueDateFor(period, p.student.dueDay)
+    const fechaVenc = formatDate(due)
+    const atrasoTexto = `${daysLabel(lateDaysAt(period, p.student.dueDay))} de atraso`
+    // Si el gimnasio cobra mora, el aviso dice el total al día de hoy: mandar solo
+    // la cuota sería avisar un número que después no coincide con lo que se cobra.
+    const moraTexto =
+      lateFee > 0
+        ? `\n\nPor el atraso se sumó un recargo de *${formatMoney(lateFee)}*, así que hoy el total es *${formatMoney(Number(p.amount) + lateFee)}* 💳`
+        : ""
 
-    return `🏋️ *${gymName}* — Aviso automático\n\n¡Hola ${name}! 👋\n\nTe escribimos para avisarte que tu cuota de *${mes}* por *${monto}* venció el *${fechaVenc}* (${atrasoTexto}) 📅\n\nTe pedimos que puedas regularizar tu situación cuando te sea posible 🙏\n\nSi ya realizaste el pago o tenés alguna duda, no dudes en escribirnos. ¡Estamos para ayudarte! 😊\n\n¡Gracias! 💪`
+    return `🏋️ *${gymName}* — Aviso automático\n\n¡Hola ${name}! 👋\n\nTe escribimos para avisarte que tu cuota de *${mes}* por *${monto}* venció el *${fechaVenc}* (${atrasoTexto}) 📅${moraTexto}\n\nTe pedimos que puedas regularizar tu situación cuando te sea posible 🙏\n\nSi ya realizaste el pago o tenés alguna duda, no dudes en escribirnos. ¡Estamos para ayudarte! 😊\n\n¡Gracias! 💪`
   }
 
-  const due = dueDate(period, p.student.dueDay)
+  const due = dueDateFor(period, p.student.dueDay)
   const now = new Date()
   const diffDays = Math.ceil((due.getTime() - now.getTime()) / 86400000)
-  const fechaVenc = due.toLocaleDateString("es-AR")
+  const fechaVenc = formatDate(due)
   const diasTexto = diffDays > 0 ? `faltan ${diffDays} día${diffDays !== 1 ? "s" : ""}` : "vence hoy"
 
   return `🏋️ *${gymName}* — Aviso automático\n\n¡Hola ${name}! 👋\n\nTe recordamos que tu cuota de *${mes}* por *${monto}* vence el *${fechaVenc}* (${diasTexto}) ⏰\n\nSi ya realizaste el pago podés ignorar este mensaje 😊\n\nAnte cualquier duda estamos a disposición. ¡Gracias! 💪`
 }
 
 export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: string; canCloseCash?: boolean }) {
-  const now = new Date()
-  const maxPeriod = toYearMonth(now)
+  // El período por defecto es el mes en curso en Argentina, no el del navegador.
+  const maxPeriod = currentPeriod()
   const [period, setPeriod] = useState(maxPeriod)
   const [minPeriod, setMinPeriod] = useState<string | undefined>(undefined)
   const [gymName, setGymName] = useState("")
@@ -126,20 +133,68 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
       })
     return () => controller.abort()
   }, [gymId])
+
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(false)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
+  // Toggle manual del descuento sobre una cuota puntual
+  const [togglingDiscountId, setTogglingDiscountId] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   type SortKey = "name" | "amount" | "due" | "status"
   const [sortKey, setSortKey] = useState<SortKey>("status")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
 
-  // Payment method modal state
+  // Cuota que se está cobrando. Todo lo que se decide en el modal (medio, mora y
+  // monto) vive adentro del modal, que se monta de cero por cada cobro.
   const [payMethodForId, setPayMethodForId] = useState<string | null>(null)
   const payMethodPayment = payMethodForId ? payments.find((p) => p.id === payMethodForId) : null
 
-  // Toggle manual del descuento
-  const [togglingDiscountId, setTogglingDiscountId] = useState<string | null>(null)
+  // Config de medios de pago del gimnasio (habilitados + recargo/descuento)
+  const [methodConfigs, setMethodConfigs] = useState<PaymentMethodConfig[]>(
+    PAYMENT_METHOD_VALUES.map(defaultPaymentMethodConfig),
+  )
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch(`/api/payment-methods?gymId=${gymId}`, { signal: controller.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((configs) => { if (Array.isArray(configs)) setMethodConfigs(configs) })
+      .catch(() => { /* se cae al default: los tres habilitados sin ajuste */ })
+    return () => controller.abort()
+  }, [gymId])
+
+  // Regla de mora del gimnasio, para previsualizar el recargo antes de cobrar
+  const [lateFeeConfig, setLateFeeConfig] = useState<LateFeeConfig>(DEFAULT_LATE_FEE_CONFIG)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch(`/api/late-fee?gymId=${gymId}`, { signal: controller.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((config) => { if (config) setLateFeeConfig(config) })
+      .catch(() => { /* se cae al default: sin recargo por mora */ })
+    return () => controller.abort()
+  }, [gymId])
+
+  /**
+   * Recargo que le corresponde a la cuota por el atraso, sin mirar si está
+   * condonado. En un pago cobrado es el que quedó guardado; en uno impago es una
+   * vista previa que crece con los días — el monto real lo vuelve a calcular el
+   * backend al registrar el pago.
+   */
+  function accruedLateFee(p: Payment): number {
+    if (p.status === "PAID") return p.lateFee ? Number(p.lateFee) : 0
+    if (p.student.lateFeeExempt) return 0
+    return computeLateFee(Number(p.amount), lateDaysAt(period, p.student.dueDay), lateFeeConfig)
+  }
+
+  /** Lo que se cobraría hoy de recargo: 0 si la cuota está condonada. */
+  function chargedLateFee(p: Payment): number {
+    return p.lateFeeWaived ? 0 : accruedLateFee(p)
+  }
+
+  // En el modal se muestra el recargo aunque esté condonado, para que el tilde de
+  // "no cobrarlo" sea visible y se pueda volver atrás.
+  const payMethodLateFee = payMethodPayment ? accruedLateFee(payMethodPayment) : 0
 
   // Unmark confirmation
   const [confirmUnpayId, setConfirmUnpayId] = useState<string | null>(null)
@@ -211,14 +266,33 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
     return () => controller.abort()
   }, [fetchPayments])
 
-  async function handleMarkPaid(id: string, method: PaymentMethod) {
+  /**
+   * Cobra la cuota. `charged` es el monto que se cobró de verdad y solo viaja si
+   * alguien lo tocó a mano: mandarlo siempre convertiría en "ajuste manual"
+   * cualquier diferencia con la cuenta del backend (la mora corre por días, y
+   * entre que se abre el modal y se confirma puede haber cambiado).
+   */
+  async function handleMarkPaid(
+    id: string,
+    method: PaymentMethod,
+    lateFeeWaived: boolean,
+    charged: number | null,
+    reason: string,
+  ) {
     setPayMethodForId(null)
     setMutationError(null)
     setUpdatingId(id)
     try {
       const res = await fetch(`/api/payments/${id}?gymId=${gymId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "PAID", paidAt: new Date().toISOString(), paymentMethod: method }),
+        body: JSON.stringify({
+          status: "PAID",
+          paidAt: new Date().toISOString(),
+          paymentMethod: method,
+          lateFeeWaived,
+          chargedAmount: charged,
+          manualAdjustmentReason: charged === null ? null : (reason.trim() || null),
+        }),
       })
       if (res.ok) {
         const updated = await res.json()
@@ -234,6 +308,14 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
     }
   }
 
+  /**
+   * Cancela un cobro: la cuota vuelve a Pendiente y se le van la fecha de pago,
+   * el medio, la mora y los ajustes. Va por `PATCH`, no por `DELETE`: no se borra
+   * la cuota, se deshace el cobro — y así también lo puede hacer la recepcionista,
+   * que es la que más cobra y la que más se equivoca al cobrar. Un pago ya
+   * verificado devuelve 409, así que solo se puede cancelar lo que todavía no
+   * entró en un cierre de caja: la ventana que el cierre después revisa.
+   */
   /** Aplica o saca el descuento de esa cuota puntual. El monto lo recalcula el
    *  servidor; acá solo se refleja lo que devuelve. */
   async function handleToggleDiscount(id: string, apply: boolean | null) {
@@ -263,13 +345,13 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
     setMutationError(null)
     setUpdatingId(id)
     try {
-      const res = await fetch(`/api/payments/${id}?gymId=${gymId}`, { method: "DELETE" })
+      const res = await fetch(`/api/payments/${id}?gymId=${gymId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "PENDING", paidAt: null }),
+      })
       if (res.ok) {
-        // Regenerate so the student reappears as PENDING
-        await fetch("/api/payments", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ gymId, period }),
-        })
+        // Se relee el período: si la cuota está fuera de término, vuelve como
+        // vencida, y eso lo decide el backend al listar.
         await fetchPayments()
       } else {
         const data = await res.json().catch(() => ({}))
@@ -332,6 +414,8 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
           transferTotal: data.transferTotal,
           cardCount: data.cardCount,
           cardTotal: data.cardTotal,
+          adjustmentsCount: data.adjustmentsCount,
+          adjustmentsTotal: data.adjustmentsTotal,
           fromDate: data.fromDate,
           toDate: data.toDate,
         })
@@ -361,7 +445,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
       let cmp = 0
       if (sortKey === "name") cmp = `${a.student.lastName} ${a.student.firstName}`.localeCompare(`${b.student.lastName} ${b.student.firstName}`)
       else if (sortKey === "amount") cmp = Number(a.amount) - Number(b.amount)
-      else if (sortKey === "due") cmp = dueDate(period, a.student.dueDay).getTime() - dueDate(period, b.student.dueDay).getTime()
+      else if (sortKey === "due") cmp = dueDateFor(period, a.student.dueDay).getTime() - dueDateFor(period, b.student.dueDay).getTime()
       else if (sortKey === "status") cmp = statusSortKey(a) - statusSortKey(b)
       return sortDir === "asc" ? cmp : -cmp
     })
@@ -372,29 +456,18 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
   const collected = payments.filter((p) => p.status === "PAID").reduce((sum, p) => sum + Number(p.amount), 0)
   const pendingAmount = payments.filter((p) => p.status === "PENDING").reduce((sum, p) => sum + Number(p.amount), 0)
   const expiredAmount = payments.filter((p) => p.status === "EXPIRED").reduce((sum, p) => sum + Number(p.amount), 0)
+  // Mora que se cobraría hoy sobre lo que sigue impago (sin las cuotas condonadas).
+  // No entra en los totales de cobranza: todavía no se cobró, y se congela recién
+  // al registrar cada pago.
+  const pendingLateFees = payments
+    .filter((p) => p.status !== "PAID")
+    .reduce((sum, p) => sum + chargedLateFee(p), 0)
   const uncollectedAmount = pendingAmount + expiredAmount
   const total = collected + uncollectedAmount
   const collectionPct = total > 0 ? Math.round((collected / total) * 100) : 0
 
-  const discounted = payments.filter((p) => Number(p.discountAmount) > 0)
-  const discountTotal = discounted.reduce((sum, p) => sum + Number(p.discountAmount), 0)
-
   const unverifiedPaid = payments.filter((p) => !p.verified && p.status === "PAID")
   const hasUnverifiedPaid = unverifiedPaid.length > 0
-  const unverifiedCollected = unverifiedPaid.reduce((sum, p) => sum + Number(p.amount), 0)
-
-  // Build closing confirmation breakdown by method
-  const unverifiedByMethod = unverifiedPaid.reduce(
-    (acc, p) => {
-      const m = p.paymentMethod
-      if (m) {
-        acc[m] = { count: (acc[m]?.count ?? 0) + 1, total: (acc[m]?.total ?? 0) + Number(p.amount) }
-      }
-      return acc
-    },
-    {} as Record<PaymentMethod, { count: number; total: number }>,
-  )
-
   const includedInClosing = unverifiedPaid.filter((p) => !excludedPaymentIds.has(p.id))
   const includedCollected = includedInClosing.reduce((sum, p) => sum + Number(p.amount), 0)
   const paymentListFiltered = unverifiedPaid.filter((p) =>
@@ -410,9 +483,12 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
         )}
       </p>
       <div className="rounded-lg border border-[#E5E4E0] bg-[#FAFAF9] p-3 space-y-2">
-        {(["CASH", "TRANSFER", "CARD"] as PaymentMethod[]).map((method) => {
+        {/* El desglose sale de los pagos del cierre, no de los medios habilitados:
+            un medio deshabilitado hoy puede tener cobros viejos acá adentro. */}
+        {PAYMENT_METHOD_VALUES.filter((method) =>
+          includedInClosing.some((p) => p.paymentMethod === method),
+        ).map((method) => {
           const included = includedInClosing.filter((p) => p.paymentMethod === method)
-          if (included.length === 0) return null
           const total = included.reduce((s, p) => s + Number(p.amount), 0)
           return (
             <div key={method} className="flex items-center justify-between text-sm">
@@ -488,7 +564,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
                         </span>
                         {p.paidAt && (
                           <span className="text-[10px] text-[#A5A49D]">
-                            {new Date(p.paidAt).toLocaleDateString("es-AR")}
+                            {formatDate(p.paidAt)}
                           </span>
                         )}
                       </div>
@@ -585,7 +661,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
           </button>
           <p className="text-sm font-semibold text-emerald-800">Pagos confirmados correctamente</p>
           <p className="text-xs text-emerald-600">
-            Período: {new Date(closingReport.fromDate).toLocaleDateString("es-AR")} — {new Date(closingReport.toDate).toLocaleDateString("es-AR")}
+            Período: {formatDate(closingReport.fromDate)} — {formatDate(closingReport.toDate)}
           </p>
           <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-emerald-700">
             <span>
@@ -594,16 +670,22 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
             </span>
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-emerald-600">
-            {closingReport.cashCount > 0 && (
-              <span>Efectivo: <span className="font-mono font-semibold">${Number(closingReport.cashTotal).toLocaleString("es-AR")}</span> ({closingReport.cashCount})</span>
-            )}
-            {closingReport.transferCount > 0 && (
-              <span>Transferencia: <span className="font-mono font-semibold">${Number(closingReport.transferTotal).toLocaleString("es-AR")}</span> ({closingReport.transferCount})</span>
-            )}
-            {closingReport.cardCount > 0 && (
-              <span>Tarjeta: <span className="font-mono font-semibold">${Number(closingReport.cardTotal).toLocaleString("es-AR")}</span> ({closingReport.cardCount})</span>
-            )}
+            {closingBreakdown(closingReport)
+              .filter((b) => b.count > 0)
+              .map((b) => (
+                <span key={b.method}>
+                  {METHOD_LABEL[b.method]}: <span className="font-mono font-semibold">{formatMoney(Number(b.total))}</span> ({b.count})
+                </span>
+              ))}
           </div>
+          {closingReport.adjustmentsCount > 0 && (
+            <p className="text-xs text-emerald-600">
+              Incluye{" "}
+              <span className="font-mono font-semibold">{signedMoney(Number(closingReport.adjustmentsTotal))}</span>{" "}
+              de ajustes hechos a mano al cobrar ({closingReport.adjustmentsCount} cuota
+              {closingReport.adjustmentsCount !== 1 ? "s" : ""})
+            </p>
+          )}
         </div>
       )}
 
@@ -617,7 +699,16 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
         <StatCard label="Total" value={payments.length} subtitle={`$${total.toLocaleString("es-AR")}`} />
         <StatCard label="Pagados" value={paid} valueColor="text-emerald-700" subtitle={`$${collected.toLocaleString("es-AR")}`} />
         <StatCard label="Pendientes" value={pending} valueColor="text-amber-700" subtitle={`$${pendingAmount.toLocaleString("es-AR")}`} />
-        <StatCard label="Vencidos" value={expired} valueColor="text-red-700" subtitle={`$${expiredAmount.toLocaleString("es-AR")}`} />
+        <StatCard
+          label="Vencidos"
+          value={expired}
+          valueColor="text-red-700"
+          subtitle={
+            pendingLateFees > 0
+              ? `$${expiredAmount.toLocaleString("es-AR")} + ${formatMoney(pendingLateFees)} de mora`
+              : `$${expiredAmount.toLocaleString("es-AR")}`
+          }
+        />
       </div>
 
       {payments.length > 0 && (
@@ -633,15 +724,6 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#F0EFEB]">
             <div className="h-full rounded-full bg-emerald-500 transition-all duration-500" style={{ width: `${collectionPct}%` }} />
           </div>
-          {discountTotal > 0 && (
-            <p className="mt-3 text-xs text-[#68685F]">
-              Descuentos aplicados:{" "}
-              <span className="font-mono font-semibold text-emerald-700">{formatMoney(discountTotal)}</span>
-              <span className="text-[#A5A49D]">
-                {" "}en {discounted.length} cuota{discounted.length !== 1 ? "s" : ""}
-              </span>
-            </p>
-          )}
         </div>
       )}
 
@@ -670,7 +752,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
             key: "due",
             header: "Vencimiento",
             render: (p) => (
-              <span className="text-[#68685F]">{dueDate(period, p.student.dueDay).toLocaleDateString("es-AR")}</span>
+              <span className="text-[#68685F]">{formatDate(dueDateFor(period, p.student.dueDay))}</span>
             ),
           },
           {
@@ -678,15 +760,31 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
             header: "Monto",
             align: "right",
             render: (p) => {
+              // En una cuota impaga la mora todavía corre: se muestra aparte del
+              // monto de la cuota, que es lo que se cobraría si se pagara hoy.
+              const fee = p.status === "PAID" ? 0 : chargedLateFee(p)
               const discount = Number(p.discountAmount)
-
-              // Descuento que la cuota tiene asignado pero no se le está
-              // aplicando: se muestra tachado, para que se entienda el monto.
-              if (discount <= 0) {
-                return (
-                  <div className="flex flex-col items-end gap-0.5">
-                    <span className="font-mono font-medium text-[#111110]">{formatMoney(p.amount)}</span>
-                    {p.discountName && (
+              return (
+                <div className="flex flex-col items-end gap-0.5">
+                  <span className="font-mono font-medium text-[#111110]">{formatMoney(Number(p.amount))}</span>
+                  {discount > 0 && (
+                    <span className="text-[10px] text-[#A5A49D]">
+                      <span className="line-through">{formatMoney(Number(p.listAmount))}</span>
+                      {" · "}
+                      <span className="text-emerald-700">−{formatMoney(discount)}</span>
+                    </span>
+                  )}
+                  {p.discountName && (
+                    discount > 0 ? (
+                      <span
+                        className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700"
+                        title={p.discountOverride === true ? "Aplicado a mano en esta cuota" : undefined}
+                      >
+                        {p.discountName}{p.discountOverride === true ? " ·" : ""}
+                      </span>
+                    ) : (
+                      // Lo tiene asignado pero no se le está aplicando: tachado,
+                      // para que se entienda por qué paga el precio de lista.
                       <span
                         className="rounded-full bg-[#F0EFEB] px-1.5 py-0.5 text-[10px] font-medium text-[#A5A49D] line-through"
                         title={
@@ -697,24 +795,11 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
                       >
                         {p.discountName}
                       </span>
-                    )}
-                  </div>
-                )
-              }
-              return (
-                <div className="flex flex-col items-end gap-0.5">
-                  <span className="font-mono font-medium text-[#111110]">{formatMoney(p.amount)}</span>
-                  <span className="text-[10px] text-[#A5A49D]">
-                    <span className="line-through">{formatMoney(p.baseAmount)}</span>
-                    {" · "}
-                    <span className="text-emerald-700">−{formatMoney(discount)}</span>
-                  </span>
-                  {p.discountName && (
-                    <span
-                      className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700"
-                      title={p.discountOverride === true ? "Aplicado a mano en esta cuota" : undefined}
-                    >
-                      {p.discountName}{p.discountOverride === true ? " ·" : ""}
+                    )
+                  )}
+                  {fee > 0 && (
+                    <span className="font-mono text-[11px] font-medium text-amber-700" title="Recargo por mora acumulado">
+                      + {formatMoney(fee)} mora
                     </span>
                   )}
                 </div>
@@ -725,16 +810,14 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
             key: "status",
             header: "Estado",
             render: (p) => {
-              const daysLate = p.status === "EXPIRED"
-                ? Math.floor((new Date().getTime() - dueDate(period, p.student.dueDay).getTime()) / 86400000)
-                : null
+              const daysLate = p.status === "EXPIRED" ? lateDaysAt(period, p.student.dueDay) : null
               return (
                 <div className="flex flex-col gap-0.5">
                   {daysLate !== null ? (
                     <div className="relative group w-fit">
                       <StatusDot dotColor={STATUS_DOT[p.status]} textColor={STATUS_TEXT[p.status]} label={STATUS_LABEL[p.status]} />
                       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-max rounded-lg bg-[#111110] px-3 py-1.5 text-xs text-white z-10">
-                        Vencido hace {daysLate === 1 ? "1 día" : `${daysLate} días`}
+                        Vencido hace {daysLabel(daysLate)}
                         <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#111110]" />
                       </div>
                     </div>
@@ -753,18 +836,44 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
             header: "Fecha de pago",
             render: (p) => (
               <span className="text-[#A5A49D]">
-                {p.paidAt ? new Date(p.paidAt).toLocaleDateString("es-AR") : "—"}
+                {p.paidAt ? formatDate(p.paidAt) : "—"}
               </span>
             ),
           },
           {
             key: "method",
             header: "Método",
-            render: (p) => (
-              <span className="text-sm text-[#68685F]">
-                {p.paymentMethod ? METHOD_LABEL[p.paymentMethod] : "—"}
-              </span>
-            ),
+            render: (p) => {
+              if (!p.paymentMethod) return <span className="text-sm text-[#68685F]">—</span>
+              const adjustment = paidAdjustment(p)
+              const manual = manualAdjustment(p)
+              const fee = p.lateFee ? Number(p.lateFee) : 0
+              return (
+                <div className="flex flex-col">
+                  <span className="text-sm text-[#68685F]">
+                    {METHOD_LABEL[p.paymentMethod]}
+                    {adjustment !== 0 && (
+                      <span className={`ml-1 text-xs font-medium ${adjustment > 0 ? "text-amber-700" : "text-emerald-700"}`}>
+                        {signedMoney(adjustment)}
+                      </span>
+                    )}
+                  </span>
+                  {fee > 0 && (
+                    <span className="text-[11px] font-medium text-amber-700">
+                      + {formatMoney(fee)} de mora{p.lateDays ? ` (${daysLabel(p.lateDays)})` : ""}
+                    </span>
+                  )}
+                  {manual !== 0 && (
+                    <span
+                      className={`text-[11px] font-medium ${manual > 0 ? "text-amber-700" : "text-emerald-700"}`}
+                      title={p.manualAdjustmentReason ?? "Ajuste manual al cobrar"}
+                    >
+                      {signedMoney(manual)} de ajuste{p.manualAdjustmentReason ? ` — ${p.manualAdjustmentReason}` : ""}
+                    </span>
+                  )}
+                </div>
+              )
+            },
           },
           {
             key: "actions",
@@ -792,7 +901,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
                 <div className="flex items-center gap-2 justify-end">
                   {p.student.phone1 && (
                     <a
-                      href={whatsappUrl(p.student.phone1, buildWhatsAppMessage(p, period, gymName))}
+                      href={whatsappUrl(p.student.phone1, buildWhatsAppMessage(p, period, gymName, chargedLateFee(p)))}
                       target="_blank"
                       rel="noopener noreferrer"
                       title="Enviar recordatorio por WhatsApp"
@@ -827,7 +936,7 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
       <ConfirmDialog
         open={confirmUnpayId !== null}
         title="Desmarcar como pagado"
-        message="Esta cuota volverá al estado Pendiente y se borrará la fecha de pago. ¿Querés continuar?"
+        message="Esta cuota volverá al estado Pendiente: se borran la fecha de pago, el medio y los ajustes que se le hayan hecho. ¿Querés continuar?"
         confirmLabel="Desmarcar"
         onConfirm={() => { if (confirmUnpayId) handleUnmarkPaid(confirmUnpayId) }}
         onCancel={() => setConfirmUnpayId(null)}
@@ -889,114 +998,27 @@ export default function PaymentsView({ gymId, canCloseCash = true }: { gymId: st
         onCancel={() => setShowExclusionConfirm(false)}
       />
 
-      {/* Modal: seleccionar método de pago */}
-      {payMethodForId !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" />
-          <div className="relative w-full max-w-sm rounded-2xl border border-[#E5E4E0] bg-white px-6 py-6 shadow-xl space-y-5">
-            <div className="space-y-1.5">
-              <p className="text-[15px] font-semibold text-[#111110]">Registrar pago</p>
-              {payMethodPayment && (
-                <p className="text-sm text-[#68685F]">
-                  {payMethodPayment.student.firstName} {payMethodPayment.student.lastName} — <span className="font-mono font-semibold">{formatMoney(payMethodPayment.amount)}</span>
-                  {Number(payMethodPayment.discountAmount) > 0 && (
-                    <span className="ml-1 text-xs line-through text-[#A5A49D]">{formatMoney(payMethodPayment.baseAmount)}</span>
-                  )}
-                </p>
-              )}
-              <p className="text-sm text-[#A5A49D]">Seleccioná el método de pago:</p>
-            </div>
-
-            {/* Descuento de esta cuota — el operario decide si se lo aplica */}
-            {payMethodPayment?.discountName && (
-              <div className="rounded-xl border border-[#E5E4E0] bg-[#FAFAF9] px-3.5 py-3 space-y-2">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#A5A49D]">Descuento</p>
-                    <p className="mt-0.5 text-sm font-medium text-[#111110] truncate">{payMethodPayment.discountName}</p>
-                  </div>
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                      Number(payMethodPayment.discountAmount) > 0
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "bg-[#F0EFEB] text-[#68685F]"
-                    }`}
-                  >
-                    {Number(payMethodPayment.discountAmount) > 0 ? "Aplicado" : "No aplicado"}
-                  </span>
-                </div>
-
-                <p className="text-xs text-[#68685F]">
-                  {Number(payMethodPayment.discountAmount) > 0
-                    ? <>Se descuentan <span className="font-mono font-semibold text-emerald-700">{formatMoney(payMethodPayment.discountAmount)}</span> sobre {formatMoney(payMethodPayment.baseAmount)}.</>
-                    : payMethodPayment.discountOverride === false
-                      ? "Se sacó a mano en esta cuota."
-                      : "No se aplica: pasó el plazo para pagarlo con descuento."}
-                  {payMethodPayment.discountOverride !== null && (
-                    <span className="text-[#A5A49D]"> · decisión manual</span>
-                  )}
-                </p>
-
-                <div className="flex flex-wrap items-center gap-2 pt-0.5">
-                  <button
-                    type="button"
-                    onClick={() => handleToggleDiscount(payMethodPayment.id, Number(payMethodPayment.discountAmount) <= 0)}
-                    disabled={togglingDiscountId === payMethodPayment.id}
-                    className="cursor-pointer rounded-lg border border-[#E5E4E0] bg-white px-3 py-1.5 text-xs font-semibold text-[#111110] transition-colors hover:border-[#111110] hover:bg-[#F0EFEB] disabled:opacity-40"
-                  >
-                    {togglingDiscountId === payMethodPayment.id
-                      ? "\u2026"
-                      : Number(payMethodPayment.discountAmount) > 0 ? "No aplicar el descuento" : "Aplicar el descuento igual"}
-                  </button>
-                  {payMethodPayment.discountOverride !== null && (
-                    <button
-                      type="button"
-                      onClick={() => handleToggleDiscount(payMethodPayment.id, null)}
-                      disabled={togglingDiscountId === payMethodPayment.id}
-                      className="cursor-pointer text-xs font-medium text-[#68685F] underline underline-offset-2 transition-colors hover:text-[#111110] disabled:opacity-40"
-                    >
-                      Volver al automático
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-            <div className="grid grid-cols-3 gap-3">
-              {METHOD_BUTTONS.map((m) => (
-                <button
-                  key={m.value}
-                  onClick={() => handleMarkPaid(payMethodForId, m.value)}
-                  disabled={updatingId === payMethodForId}
-                  className="flex flex-col items-center gap-2 rounded-xl border border-[#E5E4E0] bg-white px-3 py-4 text-sm font-medium text-[#68685F] hover:border-[#111110] hover:text-[#111110] hover:bg-[#FAFAF9] transition-colors disabled:opacity-40 cursor-pointer"
-                >
-                  {m.value === "CASH" && (
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-6 w-6">
-                      <path fillRule="evenodd" d="M1 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V4Zm12 4a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM4 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm13-1a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM1.75 14.5a.75.75 0 0 0 0 1.5c4.417 0 8.693.603 12.749 1.73 1.111.309 2.251-.512 2.251-1.696v-.784a.75.75 0 0 0-1.5 0v.784a.272.272 0 0 1-.35.25A49.043 49.043 0 0 0 1.75 14.5Z" clipRule="evenodd" />
-                    </svg>
-                  )}
-                  {m.value === "TRANSFER" && (
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-6 w-6">
-                      <path d="M13.024 9.25c.47 0 .827-.433.637-.863a4 4 0 0 0-4.094-2.364c-.468.05-.665.576-.43.984l1.08 1.868a.75.75 0 0 0 .649.375h2.158ZM7.84 7.758c-.236-.408-.79-.5-1.068-.12A3.982 3.982 0 0 0 6 10c0 .884.287 1.7.772 2.363.278.38.832.287 1.068-.12l1.078-1.868a.75.75 0 0 0 0-.75L7.839 7.758ZM9.138 12.993c-.235.408-.039.934.43.984a4 4 0 0 0 4.094-2.364c.19-.43-.168-.863-.638-.863h-2.158a.75.75 0 0 0-.65.375l-1.078 1.868Z" />
-                      <path fillRule="evenodd" d="M14.13 4.347l.644-1.117a.75.75 0 0 0-1.299-.75l-.644 1.116a20.944 20.944 0 0 0-5.662 0L6.525 2.48a.75.75 0 0 0-1.3.75l.645 1.117A20.943 20.943 0 0 0 1 10c0 1.68.211 3.31.6 4.866h.159c2.742 0 5.39-.472 7.84-1.339a21.489 21.489 0 0 0 7.842 1.339h.158c.39-1.556.601-3.186.601-4.866 0-2.07-.338-4.06-.958-5.924l-.112.27Zm-3.788 1.903a.75.75 0 0 0-1.299-.75l-1.28 2.217a.75.75 0 0 0 0 .75l1.28 2.217a.75.75 0 0 0 1.3-.75L9.262 8l1.08-1.867v.117ZM3.5 10a6.5 6.5 0 0 1 6.5-6.5c.834 0 1.64.158 2.377.446a.75.75 0 1 0 .523-1.406A7.956 7.956 0 0 0 10 2a8 8 0 1 0 7.934 7.071.75.75 0 1 0-1.49.178A6.5 6.5 0 0 1 3.5 10Z" clipRule="evenodd" />
-                    </svg>
-                  )}
-                  {m.value === "CARD" && (
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-6 w-6">
-                      <path fillRule="evenodd" d="M2.5 4A1.5 1.5 0 0 0 1 5.5V6h18v-.5A1.5 1.5 0 0 0 17.5 4h-15ZM19 8.5H1v6A1.5 1.5 0 0 0 2.5 16h15a1.5 1.5 0 0 0 1.5-1.5v-6ZM3 13.25a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5a.75.75 0 0 1-.75-.75Zm4.75-.75a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5h-3.5Z" clipRule="evenodd" />
-                    </svg>
-                  )}
-                  {m.label}
-                </button>
-              ))}
-            </div>
-            <div className="flex justify-end pt-1">
-              <Button variant="secondary" onClick={() => setPayMethodForId(null)}>
-                Cancelar
-              </Button>
-            </div>
-          </div>
-        </div>
+      {payMethodPayment && (
+        <PayPaymentModal
+          // Un modal por cuota: al cambiar de cobro se monta de cero y no puede
+          // quedar el redondeo de un alumno colgado en el del siguiente.
+          // El descuento entra en la clave porque cambia la cuota: al aplicarlo
+          // o sacarlo hay que rehacer el monto sugerido, no arrastrar el anterior.
+          key={`${payMethodPayment.id}:${payMethodPayment.discountAmount}`}
+          payment={payMethodPayment}
+          period={period}
+          methodConfigs={methodConfigs}
+          lateFee={payMethodLateFee}
+          busy={updatingId === payMethodPayment.id}
+          onCancel={() => setPayMethodForId(null)}
+          togglingDiscount={togglingDiscountId === payMethodPayment.id}
+          onToggleDiscount={(apply) => handleToggleDiscount(payMethodPayment.id, apply)}
+          onConfirm={({ method, lateFeeWaived, chargedAmount, reason }) =>
+            handleMarkPaid(payMethodPayment.id, method, lateFeeWaived, chargedAmount, reason)
+          }
+        />
       )}
+
     </div>
   )
 }

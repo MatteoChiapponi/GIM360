@@ -5,6 +5,7 @@ vi.mock("@/lib/db", () => import("./mocks/db"))
 import { db } from "./mocks/db"
 import { expireOverduePayments, generateMonthlyPayments } from "@/modules/payments/payments.service"
 import { IDS } from "./helpers"
+import { argentinaDate } from "@/lib/timezone"
 
 /**
  * Generar y recalcular las cuotas del mes: lo que efectivamente termina cobrando
@@ -21,9 +22,9 @@ const PERIOD_DATE = new Date(Date.UTC(2026, 2, 1))
 
 // El día 10 vence la cuota. Los tests fijan el reloj alrededor de esa fecha.
 const DUE_DAY = 10
-const BEFORE_DUE = new Date(2026, 2, 5)
-const AFTER_DUE = new Date(2026, 2, 12)
-const AFTER_GRACE = new Date(2026, 2, 20)
+const BEFORE_DUE = argentinaDate(2026, 3, 5)
+const AFTER_DUE = argentinaDate(2026, 3, 12)
+const AFTER_GRACE = argentinaDate(2026, 3, 20)
 
 type Row = Record<string, unknown>
 
@@ -68,7 +69,7 @@ function payment(over: Row = {}): Row {
     gymId: IDS.gym1,
     studentId: IDS.student1,
     period: PERIOD_DATE,
-    baseAmount: 30000,
+    listAmount: 30000,
     amount: 30000,
     discountAmount: 0,
     discountId: null,
@@ -121,7 +122,7 @@ describe("generateMonthlyPayments — alta de la cuota del mes", () => {
     expect(created()).toEqual([
       expect.objectContaining({
         studentId: IDS.student1,
-        baseAmount: 42000,
+        listAmount: 42000,
         amount: 42000,
         discountAmount: 0,
         discountId: null,
@@ -137,7 +138,7 @@ describe("generateMonthlyPayments — alta de la cuota del mes", () => {
     await generateMonthlyPayments(IDS.gym1, PERIOD)
 
     expect(created()[0]).toMatchObject({
-      baseAmount: 30000,
+      listAmount: 30000,
       amount: 24000,
       discountAmount: 6000,
       discountId: IDS.discount1,
@@ -228,7 +229,7 @@ describe("generateMonthlyPayments — resincronización de cuotas ya creadas", (
 
     await generateMonthlyPayments(IDS.gym1, PERIOD)
 
-    expect(updateFor("cpayment0000000000000001")).toMatchObject({ baseAmount: 35000, amount: 35000 })
+    expect(updateFor("cpayment0000000000000001")).toMatchObject({ listAmount: 35000, amount: 35000 })
   })
 
   it("aplica un descuento asignado después de generada la cuota", async () => {

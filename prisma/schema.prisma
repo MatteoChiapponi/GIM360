@@ -55,7 +55,7 @@ enum PaymentMethod {
   CARD
 }
 
-/// Cómo se calcula el descuento sobre el precio base de la cuota.
+/// Cómo se calcula el descuento sobre el precio de lista de la cuota.
 /// PERCENTAGE   → value es un porcentaje (0-100) que se resta.
 /// FIXED_AMOUNT → value es un monto fijo que se resta.
 /// FIXED_PRICE  → value es el precio final de la cuota (beca / precio especial).
@@ -63,6 +63,18 @@ enum DiscountType {
   PERCENTAGE
   FIXED_AMOUNT
   FIXED_PRICE
+}
+
+enum PaymentAdjustmentType {
+  NONE
+  SURCHARGE
+  DISCOUNT
+}
+
+/// Cómo se calcula el recargo por mora: un monto fijo en pesos o un % de la cuota.
+enum LateFeeType {
+  FIXED
+  PERCENT
 }
 
 // ─── Modelos ─────────────────────────────────────────────────────────────────
@@ -110,6 +122,9 @@ model Gym {
   studentFiles  StudentFile[]
   attendances   Attendance[]
   discounts     Discount[]
+
+  paymentMethodConfigs PaymentMethodConfig[]
+  lateFeeConfig        LateFeeConfig?
 
   @@index([ownerId])
 }
@@ -171,6 +186,8 @@ model Student {
   status               StudentStatus    @default(ACTIVE)
   trialEndsAt          DateTime?
   dueDay               Int              @default(1)
+  /// Alumno exento del recargo por mora (beca, arreglo particular).
+  lateFeeExempt        Boolean          @default(false)
   createdAt            DateTime         @default(now())
 
   groups    StudentGroup[]
@@ -259,17 +276,38 @@ model Payment {
   studentId     String
   student       Student        @relation(fields: [studentId], references: [id], onDelete: Restrict)
   period        DateTime       // first day of the month: 2026-04-01T00:00:00Z
-  baseAmount    Decimal        @db.Decimal(10, 2) // suma de los grupos, sin descuento
-  amount        Decimal        @db.Decimal(10, 2) // lo que efectivamente se cobra (baseAmount - discountAmount)
-  discountAmount Decimal       @db.Decimal(10, 2) @default(0)
-  discountId    String?
-  discount      Discount?      @relation(fields: [discountId], references: [id], onDelete: SetNull)
-  discountName  String?        // snapshot: el nombre sobrevive al borrado del descuento
+
+  // ── Precio de la cuota ─────────────────────────────────────────────────
+  // Se define al generarla: el precio de lista de los grupos menos el descuento
+  // vigente del alumno.  amount = listAmount - discountAmount
+  listAmount     Decimal  @db.Decimal(10, 2) // suma de los grupos, sin descuento
+  discountAmount Decimal  @db.Decimal(10, 2) @default(0)
+  discountId     String?
+  discount       Discount? @relation(fields: [discountId], references: [id], onDelete: SetNull)
+  discountName   String?   // snapshot: el nombre sobrevive al borrado del descuento
   /// Decisión manual del operario sobre el descuento de ESTA cuota:
   /// null = automático (manda la regla), true = aplicarlo igual, false = no aplicarlo.
   discountOverride Boolean?
+
+  /// Lo que se debe mientras está impaga; al cobrarla pasa a ser lo que se cobró:
+  ///   amount = baseAmount + lateFee + methodAdjustment + manualAdjustment
+  amount        Decimal        @db.Decimal(10, 2)
   status        PaymentStatus  @default(PENDING)
   paymentMethod PaymentMethod?
+  // Monto de la cuota antes del ajuste del medio de pago, y el ajuste aplicado
+  // (positivo = recargo, negativo = descuento). Solo se completan al cobrar.
+  baseAmount       Decimal?    @db.Decimal(10, 2)
+  methodAdjustment Decimal?    @db.Decimal(10, 2)
+  // Recargo por mora congelado al cobrar, y los días de atraso con los que se
+  // calculó. `lateFeeWaived` lo condona a mano para esta cuota puntual.
+  lateFee          Decimal?    @db.Decimal(10, 2)
+  lateDays         Int?
+  lateFeeWaived    Boolean     @default(false)
+  // Diferencia que puso a mano quien cobró: un redondeo, unos pesos de menos,
+  // una diferencia acordada. Firmada (+ cobró de más / − cobró de menos), con
+  // el motivo opcional que se dejó anotado.
+  manualAdjustment       Decimal? @db.Decimal(10, 2)
+  manualAdjustmentReason String?
   paidAt        DateTime?
   verified      Boolean        @default(false)
   cashClosingId String?
@@ -327,6 +365,45 @@ model StudentDiscount {
   @@index([discountId])
 }
 
+/// Configuración por gimnasio de cada medio de pago: si está habilitado y qué
+/// recargo o descuento (en %) se aplica sobre la cuota al cobrar con él.
+/// La ausencia de fila equivale al default: habilitado y sin ajuste.
+model PaymentMethodConfig {
+  id                String                @id @default(cuid())
+  gymId             String
+  gym               Gym                   @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  method            PaymentMethod
+  enabled           Boolean               @default(true)
+  adjustmentType    PaymentAdjustmentType @default(NONE)
+  adjustmentPercent Decimal               @default(0) @db.Decimal(5, 2)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@unique([gymId, method])
+  @@index([gymId])
+}
+
+/// Regla de mora del gimnasio: pasados `graceDays` del vencimiento, la cuota
+/// impaga suma un recargo de `feeValue` ($ o %), que se repite cada
+/// `repeatEveryDays` mientras siga impaga (null = una sola vez).
+/// Dos topes opcionales e independientes: `maxCharges` limita cuántas veces
+/// puede cobrarse y `maxFeeAmount` cuánto puede acumular en pesos.
+/// La ausencia de fila equivale al default: regla apagada.
+model LateFeeConfig {
+  id              String      @id @default(cuid())
+  gymId           String      @unique
+  gym             Gym         @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  enabled         Boolean     @default(false)
+  graceDays       Int         @default(0)
+  feeType         LateFeeType @default(PERCENT)
+  feeValue        Decimal     @default(0) @db.Decimal(10, 2)
+  repeatEveryDays Int?
+  maxCharges      Int?
+  maxFeeAmount    Decimal?    @db.Decimal(10, 2)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
 model StudentFile {
   id          String          @id @default(cuid())
   studentId   String
@@ -359,6 +436,10 @@ model CashClosing {
   transferTotal      Decimal  @db.Decimal(10, 2) @default(0)
   cardCount          Int      @default(0)
   cardTotal          Decimal  @db.Decimal(10, 2) @default(0)
+  // Cuánto de lo cobrado salió de ajustes puestos a mano al cobrar, para que el
+  // cierre muestre la diferencia contra lo que decían las cuotas.
+  adjustmentsCount   Int      @default(0)
+  adjustmentsTotal   Decimal  @db.Decimal(10, 2) @default(0)
   notes              String?
   createdAt          DateTime @default(now())
 

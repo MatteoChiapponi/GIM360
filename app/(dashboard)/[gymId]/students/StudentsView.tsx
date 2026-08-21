@@ -16,7 +16,13 @@ import { DataTable } from "@/components/ui/DataTable"
 import { FormModal } from "@/components/ui/FormModal"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog"
 import {
-  DISCOUNT_TYPE_LABEL, ON_TIME_ONLY_LABEL, formatDiscountValue, formatGracePeriod, formatMoney,
+  PAYMENT_METHOD_LABEL,
+  type PaymentMethodValue as PaymentMethod,
+} from "@/lib/payment-methods"
+import { formatMoney, signedMoney } from "@/lib/money"
+import { formatDate, formatMonthYear, fromISODate } from "@/lib/timezone"
+import {
+  DISCOUNT_TYPE_LABEL, ON_TIME_ONLY_LABEL, formatDiscountValue, formatGracePeriod,
   type DiscountType,
 } from "@/lib/discounts-format"
 import { computeDiscountAmount } from "@/modules/discounts/discounts.calc"
@@ -26,17 +32,21 @@ import { computeDiscountAmount } from "@/modules/discounts/discounts.calc"
 type StudentStatus = "ACTIVE" | "INACTIVE" | "TRIAL"
 type StudentFileType = "FICHA" | "APTO_MEDICO"
 type PaymentStatus = "PENDING" | "PAID" | "EXPIRED"
-type PaymentMethod = "CASH" | "TRANSFER" | "CARD"
 
 type StudentPayment = {
   id: string
   period: string
-  baseAmount: string
+  listAmount: string
   amount: string
   discountAmount: string
   discountName: string | null
   status: PaymentStatus
   paymentMethod: PaymentMethod | null
+  /** Ajuste del medio de pago ya aplicado al monto, firmado (+ recargo / − descuento) */
+  methodAdjustment: string | null
+  /** Diferencia que puso a mano quien cobró, firmada (+ de más / − de menos) */
+  manualAdjustment: string | null
+  manualAdjustmentReason: string | null
   paidAt: string | null
   verified: boolean
 }
@@ -87,7 +97,7 @@ type StudentDetail = {
   id: string; firstName: string; lastName: string
   phone1: string; phone2: string | null; emergencyContact: string | null; emergencyPhone: string | null
   birthDate: string | null; nationalId: string | null
-  joinedAt: string; leftAt: string | null; dueDay: number
+  joinedAt: string; leftAt: string | null; dueDay: number; lateFeeExempt: boolean
   status: StudentStatus
   trialEndsAt: string | null
   groups: EnrolledGroup[]
@@ -108,7 +118,7 @@ const DAY_ORDER: Record<DayOfWeek, number> = {
 
 function fmtDate(iso: string | null) {
   if (!iso) return "—"
-  return new Date(iso).toLocaleDateString("es-AR")
+  return formatDate(iso)
 }
 
 /** ISO de un período mensual → "2026-03", el formato de <input type="month">. */
@@ -150,14 +160,18 @@ type NewForm = {
   fichaFile: File | null; aptoFile: File | null
   isTrial: boolean; trialEndsAt: string
 }
-type EditForm = { firstName: string; lastName: string; dueDay: string; phone1: string; phone2: string }
+type EditForm = {
+  firstName: string; lastName: string; dueDay: string; phone1: string; phone2: string
+  /** Exime al alumno del recargo por mora del gimnasio */
+  lateFeeExempt: boolean
+}
 
 const EMPTY_FORM: NewForm = {
   firstName: "", lastName: "", dueDay: "", phone1: "", phone2: "", groupId: "",
   fichaFile: null, aptoFile: null,
   isTrial: false, trialEndsAt: "",
 }
-const EMPTY_EDIT: EditForm = { firstName: "", lastName: "", dueDay: "", phone1: "", phone2: "" }
+const EMPTY_EDIT: EditForm = { firstName: "", lastName: "", dueDay: "", phone1: "", phone2: "", lateFeeExempt: false }
 
 type AssignForm = { discountId: string; validFrom: string; validUntil: string; notes: string }
 const EMPTY_ASSIGN: AssignForm = { discountId: "", validFrom: "", validUntil: "", notes: "" }
@@ -418,6 +432,7 @@ export default function StudentsView({ gymId, canManageDiscounts = false }: { gy
       dueDay: String(selectedDetail.dueDay),
       phone1: selectedDetail.phone1,
       phone2: selectedDetail.phone2 ?? "",
+      lateFeeExempt: selectedDetail.lateFeeExempt,
     })
     setShowEditModal(true)
     setEditError(null)
@@ -440,6 +455,7 @@ export default function StudentsView({ gymId, canManageDiscounts = false }: { gy
         dueDay: day,
         phone1: editForm.phone1.trim(),
         phone2: editForm.phone2.trim() || null,
+        lateFeeExempt: editForm.lateFeeExempt,
       }),
     })
     if (res.ok) {
@@ -498,7 +514,7 @@ export default function StudentsView({ gymId, canManageDiscounts = false }: { gy
     if (form.phone2.trim()) body.phone2 = form.phone2.trim()
     if (form.isTrial) {
       body.status = "TRIAL"
-      body.trialEndsAt = new Date(form.trialEndsAt).toISOString()
+      body.trialEndsAt = fromISODate(form.trialEndsAt).toISOString()
     }
 
     const res = await fetch("/api/students", {
@@ -823,6 +839,9 @@ export default function StudentsView({ gymId, canManageDiscounts = false }: { gy
                         <div className="rounded-lg border border-[#E5E4E0] bg-[#FAFAF9] px-3 py-2.5">
                           <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#A5A49D]">Día de cobro</p>
                           <p className="mt-1 font-mono text-sm font-semibold text-[#111110]">{selectedDetail.dueDay}</p>
+                          {selectedDetail.lateFeeExempt && (
+                            <p className="mt-1 text-[11px] font-medium text-emerald-700">Exento de mora</p>
+                          )}
                         </div>
                         <div className="rounded-lg border border-[#E5E4E0] bg-[#FAFAF9] px-3 py-2.5">
                           <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#A5A49D]">Fecha de ingreso</p>
@@ -1003,17 +1022,15 @@ export default function StudentsView({ gymId, canManageDiscounts = false }: { gy
                       <div className="rounded-lg border border-[#E5E4E0] overflow-hidden">
                         {studentPayments.map((p, i) => {
                           const [year, month] = p.period.split("T")[0].split("-")
-                          const periodLabel = new Date(Number(year), Number(month) - 1, 1)
-                            .toLocaleDateString("es-AR", { month: "long", year: "numeric" })
+                          const periodLabel = formatMonthYear(`${year}-${month}`)
                           const statusColors: Record<PaymentStatus, string> = {
                             PAID: "text-emerald-700", PENDING: "text-amber-700", EXPIRED: "text-red-700",
                           }
                           const statusLabels: Record<PaymentStatus, string> = {
                             PAID: "Pagado", PENDING: "Pendiente", EXPIRED: "Vencido",
                           }
-                          const methodLabels: Record<PaymentMethod, string> = {
-                            CASH: "Efectivo", TRANSFER: "Transferencia", CARD: "Tarjeta",
-                          }
+                          const adjustment = p.methodAdjustment ? Number(p.methodAdjustment) : 0
+                          const manual = p.manualAdjustment ? Number(p.manualAdjustment) : 0
                           return (
                             <div
                               key={p.id}
@@ -1022,16 +1039,23 @@ export default function StudentsView({ gymId, canManageDiscounts = false }: { gy
                               <div className="min-w-0">
                                 <p className="font-medium text-[#111110] capitalize">{periodLabel}</p>
                                 <p className="text-xs text-[#A5A49D]">
-                                  {p.paymentMethod ? methodLabels[p.paymentMethod] : "—"}
-                                  {p.paidAt ? ` · ${new Date(p.paidAt).toLocaleDateString("es-AR")}` : ""}
+                                  {p.paymentMethod ? PAYMENT_METHOD_LABEL[p.paymentMethod] : "—"}
+                                  {adjustment !== 0 && ` ${signedMoney(adjustment)}`}
+                                  {p.paidAt ? ` · ${formatDate(p.paidAt)}` : ""}
                                   {p.verified ? " · ✓" : ""}
                                 </p>
+                                {manual !== 0 && (
+                                  <p className={`text-xs font-medium ${manual > 0 ? "text-amber-700" : "text-emerald-700"}`}>
+                                    {signedMoney(manual)} de ajuste
+                                    {p.manualAdjustmentReason ? ` — ${p.manualAdjustmentReason}` : ""}
+                                  </p>
+                                )}
                               </div>
                               <div className="text-right shrink-0">
-                                <p className="font-mono font-semibold text-[#111110]">{formatMoney(p.amount)}</p>
+                                <p className="font-mono font-semibold text-[#111110]">{formatMoney(Number(p.amount))}</p>
                                 {Number(p.discountAmount) > 0 && (
                                   <p className="text-[10px] text-[#A5A49D]">
-                                    <span className="line-through">{formatMoney(p.baseAmount)}</span>
+                                    <span className="line-through">{formatMoney(Number(p.listAmount))}</span>
                                     {p.discountName ? ` · ${p.discountName}` : ""}
                                   </p>
                                 )}
@@ -1151,6 +1175,20 @@ export default function StudentsView({ gymId, canManageDiscounts = false }: { gy
         <FormField label="Teléfono secundario">
           <Input value={editForm.phone2} onChange={(e) => setEditForm((f) => ({ ...f, phone2: e.target.value }))} placeholder="Ej: 11 8765-4321" />
         </FormField>
+        <label className="flex items-start gap-2 text-sm text-[#68685F] cursor-pointer sm:col-span-2">
+          <input
+            type="checkbox"
+            checked={editForm.lateFeeExempt}
+            onChange={(e) => setEditForm((f) => ({ ...f, lateFeeExempt: e.target.checked }))}
+            className="mt-0.5 h-4 w-4 rounded border-[#E5E4E0] accent-[#111110]"
+          />
+          <span>
+            Exento del recargo por mora
+            <span className="block text-xs text-[#A5A49D]">
+              Sus cuotas vencidas se cobran al monto original, aunque el gimnasio cobre mora.
+            </span>
+          </span>
+        </label>
       </FormModal>
 
       <ConfirmDialog

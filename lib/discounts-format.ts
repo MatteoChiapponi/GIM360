@@ -4,6 +4,7 @@
  * que usa el backend, que no depende de Prisma justamente para poder usarse en
  * las dos puntas y no tener dos versiones de la misma cuenta.
  */
+import { formatMoney } from "@/lib/money"
 import type { DiscountType } from "@/modules/discounts/discounts.calc"
 
 export type { DiscountType }
@@ -20,15 +21,11 @@ export const DISCOUNT_TYPE_HINT: Record<DiscountType, string> = {
   FIXED_PRICE: "La cuota pasa a valer ese monto, sin importar en cuántos grupos esté el alumno. Ideal para becas o precios especiales.",
 }
 
-export function formatMoney(value: string | number): string {
-  return `$${Number(value).toLocaleString("es-AR")}`
-}
-
 /** Cómo se lee el valor de un descuento según su tipo. */
 export function formatDiscountValue(type: DiscountType, value: string | number): string {
   if (type === "PERCENTAGE") return `${Number(value)}%`
-  if (type === "FIXED_AMOUNT") return `−${formatMoney(value)}`
-  return `${formatMoney(value)} fijo`
+  if (type === "FIXED_AMOUNT") return `−${formatMoney(Number(value))}`
+  return `${formatMoney(Number(value))} fijo`
 }
 
 /** Leyenda del descuento que se pierde por mora, usada en las tres vistas. */

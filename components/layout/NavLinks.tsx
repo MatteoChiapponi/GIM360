@@ -22,6 +22,7 @@ export function NavLinks({ gymId, role }: { gymId: string; role?: string }) {
     { section: "discounts",     label: "Descuentos",    href: `/${gymId}/discounts` },
     { section: "expenses",      label: "Gastos",        href: `/${gymId}/expenses` },
     { section: "metrics",       label: "Métricas",      href: `/${gymId}/metrics` },
+    { section: "settings",      label: "Configuración", href: `/${gymId}/settings` },
   ]
 
   const items = role === "RECEPTIONIST"

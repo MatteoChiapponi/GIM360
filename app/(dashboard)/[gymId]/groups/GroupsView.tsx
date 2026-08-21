@@ -14,6 +14,7 @@ import { SearchToolbar } from "@/components/ui/SearchToolbar"
 import { DataTable } from "@/components/ui/DataTable"
 import { FormModal } from "@/components/ui/FormModal"
 import { StatusDot } from "@/components/ui/StatusDot"
+import { fromISODate } from "@/lib/timezone"
 
 type DayOfWeek = "MONDAY" | "TUESDAY" | "WEDNESDAY" | "THURSDAY" | "FRIDAY" | "SATURDAY" | "SUNDAY"
 
@@ -185,7 +186,7 @@ export default function GroupsView({ gymId }: { gymId: string }) {
       for (const s of scheduleRows) {
         await fetch(`/api/schedules?gymId=${gymId}`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ groupId: created.id, weekDays: s.weekDays, startTime: s.startTime, endTime: s.endTime, startDate: new Date(s.startDate).toISOString() }),
+          body: JSON.stringify({ groupId: created.id, weekDays: s.weekDays, startTime: s.startTime, endTime: s.endTime, startDate: fromISODate(s.startDate).toISOString() }),
         })
       }
 

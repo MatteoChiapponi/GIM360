@@ -12,6 +12,14 @@ const JS_DAY_TO_ENUM: Record<number, DayOfWeek> = {
   6: "SATURDAY",
 }
 
+/**
+ * "YYYY-MM-DD" → medianoche UTC.
+ *
+ * `Attendance.date` es un día calendario, no un instante, y se guarda a
+ * medianoche UTC — una convención que no depende de ninguna zona, así que acá
+ * el `Date.UTC` es a propósito. El día que llega ya es el argentino: la UI lo
+ * arma con `todayISO()` de `lib/timezone`.
+ */
 function parseDate(dateStr: string): Date {
   const [y, m, d] = dateStr.split("-").map(Number)
   return new Date(Date.UTC(y, m - 1, d))

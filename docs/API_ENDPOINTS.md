@@ -20,6 +20,7 @@
 - [Payments](#payments)
 - [Discounts (descuentos)](#discounts-descuentos)
 - [Student Discounts (asignaciones)](#student-discounts-asignaciones)
+- [Late Fee (recargo por mora)](#late-fee-recargo-por-mora)
 - [Cash Closings (cierres de caja)](#cash-closings-cierres-de-caja)
 - [Metrics](#metrics)
 
@@ -750,7 +751,7 @@ Cada entrada de `schedules`:
 
 **Logica:**
 - Si se pasa `studentId`: retorna todos los pagos de ese alumno (sin filtro por periodo).
-- Si no: retorna pagos del periodo indicado. Antes de responder recalcula `PENDING`/`EXPIRED` segun el vencimiento y, por separado, aplica o levanta los descuentos marcados como `loseOnLatePayment` segun su propio plazo (vencimiento + `graceDays`).
+- Si no: retorna pagos del periodo indicado.
 
 **Retorna:** `Payment[]`
 
@@ -770,7 +771,7 @@ Cada entrada de `schedules`:
 | `gymId`  | string (CUID) | Si |
 | `period` | string | Si (formato `YYYY-MM`) |
 
-**Logica:** Crea un registro `Payment` por cada alumno activo inscrito en al menos un grupo. `baseAmount` es la suma de `monthlyPrice` de cada grupo al que pertenece; si el alumno tiene un descuento vigente para ese periodo, se calcula `discountAmount` y `amount` queda en `baseAmount - discountAmount`. Un descuento con `loseOnLatePayment` no se aplica si la cuota ya paso su plazo (vencimiento + `graceDays`). Tambien resincroniza las cuotas `PENDING`/`EXPIRED` cuando cambio la inscripcion a grupos o el descuento. Las cuotas `PAID` no se tocan: conservan el descuento con el que se cobraron.
+**Logica:** Crea un registro `Payment` por cada alumno activo inscrito en al menos un grupo. El monto se calcula como la suma de `monthlyPrice` de cada grupo al que pertenece.
 
 **Retorna:** `Payment[]` (201 Created)
 
@@ -791,9 +792,11 @@ Cada entrada de `schedules`:
 | `paymentMethod` | enum   | No (requerido si status=PAID). `CASH`, `TRANSFER`, `CARD`, `OTHER` |
 | `paidAt`        | datetime | No |
 | `notes`         | string | No |
+| `amount`        | number | No |
+| `lateFeeWaived` | boolean | No (condona el recargo por mora de esta cuota) |
+| `chargedAmount` | number \| null | No (monto que se cobro de verdad; `null` borra el ajuste manual) |
+| `manualAdjustmentReason` | string \| null | No (motivo del ajuste manual, max 200) |
 | `discountOverride` | boolean \| null | No — decision manual sobre el descuento de esa cuota |
-
-`amount` no se acepta: desde que hay descuentos es un valor derivado (`baseAmount - discountAmount`) y lo calcula el servidor.
 
 **Descuento a mano:** si el body trae `discountOverride`, el endpoint no actualiza nada mas: aplica la decision y recalcula el monto en el servidor.
 - `true` — aplicar el descuento aunque la regla lo hubiera sacado (perdonarle la mora).
@@ -806,10 +809,27 @@ La decision queda guardada en la cuota, asi que sobrevive a las sincronizaciones
 - No se puede modificar un pago verificado (cierre de caja ya realizado).
 - Si `status = PAID`, `paymentMethod` es obligatorio.
 - Si `status != PAID`, `paymentMethod` se limpia automaticamente.
+- Cobrar con un medio de pago deshabilitado devuelve 400.
+
+**Logica de montos:** el backend recalcula lo que se cobra y guarda la descomposicion
+`amount = baseAmount + lateFee + methodAdjustment + manualAdjustment`:
+- `baseAmount` — la cuota limpia.
+- `lateFee` / `lateDays` — recargo por mora segun la regla del gimnasio y los dias de atraso a la
+  fecha de `paidAt`. Queda en 0 si el alumno es `lateFeeExempt` o si se manda `lateFeeWaived`.
+- `methodAdjustment` — recargo o descuento del medio de pago, calculado sobre cuota + mora.
+- `manualAdjustment` — la diferencia entre lo que dan esas reglas y el `chargedAmount` que manda
+  quien cobra: el redondeo del mostrador. Va firmado (+ se cobro de mas / − de menos) y se guarda
+  con su `manualAdjustmentReason`. Un ajuste ya guardado se mantiene si la edicion no manda
+  `chargedAmount` (corregirle el medio a un pago no borra el redondeo); `chargedAmount: null` lo
+  borra y devuelve el pago al monto calculado.
+
+Al despagar (o al limpiar el medio), `amount` vuelve a la cuota limpia y el resto se pone en `null`.
 
 **Retorna:** `Payment` actualizado.
 
-**Donde se usa:** `PaymentsView.tsx` — marcar como pagado, editar monto/notas.
+**Donde se usa:** `PaymentsView.tsx` — modal de cobro (medio de pago, condonar la mora y ajustar el
+monto a cobrar), cancelar un cobro (`status: PENDING`, que devuelve la cuota limpia) y editar
+monto/notas.
 
 ---
 
@@ -823,13 +843,16 @@ La decision queda guardada en la cuota, asi que sobrevive a las sincronizaciones
 
 **Retorna:** 204 No Content.
 
-**Donde se usa:** `PaymentsView.tsx` — eliminar pago y regenerar.
+**Donde se usa:** Ningun lugar de la UI. Cancelar un cobro se hace con `PATCH status: PENDING`, que
+deja la cuota impaga en vez de borrarla; este DELETE borra el registro y queda para el owner.
 
 ---
 
 ## Discounts (descuentos)
 
-Los descuentos los configura el dueño y se aplican solos sobre la cuota de los alumnos que los tengan asignados. Hay tres tipos:
+Los descuentos los configura el dueño y se aplican solos sobre la cuota de los alumnos que los tengan asignados, **al generarla**. De ahi sale lo que el alumno debe (`amount = listAmount - discountAmount`), que despues es el punto de partida del cobro: mora, medio de pago y ajuste manual se calculan sobre eso.
+
+Hay tres tipos:
 
 | Tipo | `value` significa | Efecto sobre una cuota de $30.000 |
 |------|-------------------|-----------------------------------|
@@ -839,9 +862,7 @@ Los descuentos los configura el dueño y se aplican solos sobre la cuota de los 
 
 El descuento nunca deja la cuota por debajo de cero ni genera recargo.
 
-Ademas, cualquiera de los tres puede marcarse con `loseOnLatePayment: true` ("solo por pago en termino"): el descuento se pierde cuando la cuota pasa **su plazo**, que es el vencimiento (`dueDay` del alumno) mas los `graceDays` configurados. Son dos relojes distintos: la cuota figura como `EXPIRED` desde su vencimiento, pero el descuento sigue en pie mientras dure la gracia. Con `graceDays: 0` los dos plazos coinciden.
-
-No es definitivo — la cuota conserva el vinculo con el descuento y `discountAmount` en cero, asi que si el plazo deja de estar pasado, el descuento vuelve.
+Ademas, cualquiera de los tres puede marcarse con `loseOnLatePayment: true` ("solo por pago en termino"): se pierde cuando los dias de atraso de la cuota superan sus `graceDays`. Es un plazo aparte del vencimiento — la cuota figura como `EXPIRED` desde su vencimiento, pero el descuento sigue en pie mientras dure la gracia. No es definitivo: la cuota conserva el vinculo y `discountAmount` en cero, asi que si el plazo deja de estar pasado, el descuento vuelve.
 
 Esa regla es el automatico. Sobre cada cuota concreta, quien la cobra puede decidir a mano con `discountOverride` (ver `PATCH /api/payments/:id`), y esa decision le gana a la regla.
 
@@ -850,8 +871,6 @@ Esa regla es el automatico. Sobre cada cuota concreta, quien la cobra puede deci
 **Para que sirve:** Listar los descuentos del gimnasio, con la cantidad de alumnos que tiene cada uno asignado.
 
 **Roles:** `OWNER`
-
-**Recibe (query params):** `gymId` (requerido).
 
 **Retorna:** `Discount[]` con `_count.students`.
 
@@ -875,11 +894,9 @@ Esa regla es el automatico. Sobre cada cuota concreta, quien la cobra puede deci
 | `description` | string | No (max 200) |
 | `active`      | boolean| No (default `true`) |
 | `loseOnLatePayment` | boolean | No (default `false`) — se pierde al pasar su plazo |
-| `graceDays`   | number | No (default `0`, entero 0-60) — dias de tolerancia despues del vencimiento antes de perderlo |
+| `graceDays`   | number | No (default `0`, entero 0-60) — dias de tolerancia antes de perderlo |
 
 **Retorna:** `Discount` (201 Created). `409` si ya existe uno con ese nombre en el gimnasio.
-
-**Donde se usa:** `DiscountsView.tsx` — modal "Nuevo descuento".
 
 ---
 
@@ -893,29 +910,17 @@ Esa regla es el automatico. Sobre cada cuota concreta, quien la cobra puede deci
 
 **Logica:** Un descuento con `active: false` deja de aplicarse a las cuotas nuevas y no se puede asignar, pero conserva las asignaciones y el historial.
 
-**Retorna:** `Discount`. `409` si el nombre choca con otro descuento del gimnasio.
-
-**Donde se usa:** `DiscountsView.tsx` — modal de edicion y boton Activar/Desactivar.
-
 ---
 
 ### `DELETE /api/discounts/:id?gymId=xxx`
 
-**Para que sirve:** Eliminar un descuento y desasignarlo de todos los alumnos que lo tenian.
+**Para que sirve:** Eliminar un descuento y desasignarlo de todos los alumnos.
 
 **Roles:** `OWNER`
 
-**Logica:** Corre en una transaccion:
-1. Las cuotas sin cobrar (`PENDING` / `EXPIRED`) que tenian ese descuento vuelven al precio de lista en el acto — `amount` pasa a `baseAmount` y se limpian `discountAmount`, `discountId` y `discountName`.
-2. Se borra el descuento; las asignaciones (`StudentDiscount`) se van por cascade.
-
-Las cuotas ya cobradas no se tocan: quedan con el monto con el que se cobraron y conservan `discountName` como snapshot (`discountId` pasa a null por la FK).
-
-Si la idea es dejar de usarlo pero conservar las asignaciones y el historial, la alternativa es `PATCH` con `active: false`.
+**Logica:** Las asignaciones caen por cascade y, en la misma transaccion, las cuotas sin cobrar que lo tenian aplicado vuelven al precio de lista. Las cuotas pagadas no se tocan: conservan `discountName` como testimonio.
 
 **Retorna:** `204 No Content`.
-
-**Donde se usa:** `DiscountsView.tsx` — boton Eliminar.
 
 ---
 
@@ -930,8 +935,6 @@ La vigencia se expresa en periodos mensuales (`YYYY-MM`), igual que `Payment.per
 **Roles:** `OWNER`
 
 **Retorna:** `StudentDiscount[]` con el `discount` embebido.
-
-**Donde se usa:** `StudentsView.tsx` — seccion "Descuento" del panel de detalle.
 
 ---
 
@@ -949,46 +952,73 @@ La vigencia se expresa en periodos mensuales (`YYYY-MM`), igual que `Payment.per
 | `validUntil` | string \| null | No (`YYYY-MM`; null = sin fecha de corte) |
 | `notes`      | string | No (max 200) |
 
-**Validaciones:**
-- `403` si el descuento es de otro gimnasio.
-- `404` si el descuento no existe.
-- `409` si el descuento esta desactivado.
-- `409` si el alumno ya tiene otro descuento vigente que se pisa con ese rango.
-- `400` si `validUntil` es anterior a `validFrom`.
-
-**Retorna:** `StudentDiscount` (201 Created).
-
-**Donde se usa:** `StudentsView.tsx` — modal "Asignar descuento".
+**Validaciones:** `403` si el descuento es de otro gimnasio · `404` si no existe · `409` si esta desactivado · `409` si se pisa con otra vigencia del alumno · `400` si `validUntil` es anterior a `validFrom`.
 
 ---
 
 ### `PATCH /api/students/:id/discounts/:assignmentId?gymId=xxx`
 
-**Para que sirve:** Cambiar la vigencia o la nota de una asignacion.
+**Para que sirve:** Cambiar la vigencia o la nota de una asignacion. Mismas validaciones que el `POST`.
 
 **Roles:** `OWNER`
-
-**Recibe (body JSON):** `validFrom`, `validUntil`, `notes` — todos opcionales.
-
-**Validaciones:** las mismas de solapamiento y rango invertido que el `POST`.
-
-**Retorna:** `StudentDiscount`.
-
-**Donde se usa:** Todavia no se usa en el frontend (la UI hoy quita y vuelve a asignar).
 
 ---
 
 ### `DELETE /api/students/:id/discounts/:assignmentId?gymId=xxx`
 
-**Para que sirve:** Quitarle el descuento al alumno.
+**Para que sirve:** Quitarle el descuento al alumno. Las cuotas sin cobrar de los periodos que cubria vuelven al precio de lista; las pagadas no se tocan.
 
 **Roles:** `OWNER`
 
-**Logica:** Igual que al borrar el descuento entero, pero acotado a este alumno y a los periodos que cubria la vigencia de esta asignacion: esas cuotas sin cobrar vuelven al precio de lista. Las de otros periodos y las ya cobradas no se tocan.
-
 **Retorna:** `204 No Content`.
 
-**Donde se usa:** `StudentsView.tsx` — boton Quitar de la seccion "Descuento".
+---
+
+## Late Fee (recargo por mora)
+
+### `GET /api/late-fee?gymId=xxx`
+
+**Para que sirve:** Leer la regla de recargo por mora del gimnasio.
+
+**Roles:** `OWNER`, `RECEPTIONIST`
+
+**Recibe (query params):** `gymId` (requerido).
+
+**Retorna:** `{ enabled, graceDays, feeType, feeValue, repeatEveryDays, maxCharges, maxFeeAmount }`. Un gimnasio que
+nunca la configuro devuelve el default: la regla apagada.
+
+**Donde se usa:** `LateFeeSettings.tsx` — formulario de configuracion. `PaymentsView.tsx` —
+vista previa del recargo antes de cobrar.
+
+---
+
+### `PATCH /api/late-fee`
+
+**Para que sirve:** Configurar el recargo por mora del gimnasio.
+
+**Roles:** `OWNER`
+
+**Recibe (body JSON):**
+| Campo          | Tipo    | Requerido |
+|----------------|---------|-----------|
+| `gymId`        | string  | Si |
+| `enabled`      | boolean | Si |
+| `graceDays`    | number  | Si (entero, 0 a 365) |
+| `feeType`      | enum    | Si (`FIXED`, `PERCENT`) |
+| `feeValue`     | number  | Si (pesos si `FIXED`, % si `PERCENT`) |
+| `repeatEveryDays` | number \| null | Si (cada cuantos dias se repite; `null` = una sola vez) |
+| `maxCharges`   | number \| null | Si (tope de veces que se cobra; `null` = sin tope) |
+| `maxFeeAmount` | number \| null | Si (tope del recargo acumulado en pesos; `null` = sin tope) |
+
+**Validaciones:**
+- Con `enabled = true`, `feeValue` tiene que ser mayor a 0.
+- Con `feeType = PERCENT`, `feeValue` no puede superar 100.
+- `maxCharges` solo se acepta si el recargo se repite (`repeatEveryDays` no nulo).
+- El gimnasio tiene que estar activo.
+
+**Retorna:** la regla guardada.
+
+**Donde se usa:** `LateFeeSettings.tsx` — boton de guardar.
 
 ---
 
@@ -1023,7 +1053,9 @@ La vigencia se expresa en periodos mensuales (`YYYY-MM`), igual que `Payment.per
 | `gymId` | string (CUID) | Si |
 | `notes` | string | No |
 
-**Retorna:** `CashClosing` (201 Created) con totales por metodo de pago.
+**Retorna:** `CashClosing` (201 Created) con totales por metodo de pago. `adjustmentsCount` y
+`adjustmentsTotal` resumen lo que se ajusto a mano al cobrar: ya esta dentro de `totalCollected`,
+se informa aparte para ver la diferencia contra lo que decian las cuotas.
 
 **Donde se usa:** `PaymentsView.tsx` — boton "Cerrar caja".
 

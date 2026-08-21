@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { SkeletonMetrics } from "@/components/ui/Skeleton"
 import { InfoTooltip } from "@/components/ui/InfoTooltip"
+import { currentPeriod, formatMonthYear } from "@/lib/timezone"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -241,8 +242,11 @@ function HealthIndexView({ health: h }: { health: HealthIndexMetrics }) {
 
 function GroupDetailView({ group: g, onBack }: { group: GroupMetrics; onBack: () => void }) {
   const collectionPct = g.projectedRevenue > 0 ? (g.collectedRevenue / g.projectedRevenue) * 100 : 0
-  const uncollected = g.projectedRevenue - g.collectedRevenue
-  const uncollectedPct = 100 - collectionPct
+  // Lo cobrado puede superar lo proyectado (un recargo por medio de pago, o alumnos
+  // que se dieron de baja después de pagar): ahí no queda nada pendiente, y el
+  // pendiente nunca es negativo.
+  const uncollected = Math.max(g.projectedRevenue - g.collectedRevenue, 0)
+  const uncollectedPct = Math.max(100 - collectionPct, 0)
   const costRevenuePct = g.collectedRevenue > 0 ? (g.trainerCost / g.collectedRevenue) * 100 : 0
   const marginPct = g.collectedRevenue > 0 ? (g.margin / g.collectedRevenue) * 100 : 0
   const marginColor = g.margin >= 0 ? "#10b981" : "#ef4444"
@@ -408,18 +412,12 @@ function GroupDetailView({ group: g, onBack }: { group: GroupMetrics; onBack: ()
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-function formatPeriod(period: string) {
-  const [year, month] = period.split("-")
-  const date = new Date(Number(year), Number(month) - 1, 1)
-  return date.toLocaleDateString("es-AR", { month: "long", year: "numeric" })
-}
-
-function toYearMonth(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
-}
+const formatPeriod = formatMonthYear
 
 export default function MetricsView({ gymId }: { gymId: string }) {
-  const period = toYearMonth(new Date())
+  // El mes en curso en Argentina, no el del navegador: si no, el 1° a la mañana
+  // (o el último día a la noche) las métricas salen del mes equivocado.
+  const period = currentPeriod()
   const [activeView, setActiveView] = useState<MetricView>("gimnasio")
   const [healthMetrics, setHealthMetrics] = useState<HealthIndexMetrics | null>(null)
   const [gymMetrics, setGymMetrics] = useState<GymMetrics | null>(null)

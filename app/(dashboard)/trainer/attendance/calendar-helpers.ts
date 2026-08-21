@@ -1,3 +1,25 @@
+/**
+ * Armado del calendario de asistencias.
+ *
+ * Todas las fechas de acá son marcadores de día, y el día es el argentino: cada
+ * `Date` es la medianoche de Buenos Aires y se lee con los helpers de
+ * `lib/timezone`, nunca con `getDate()` / `getMonth()` / `getDay()`, que
+ * responden en la zona del navegador. Sin eso, un entrenador con la máquina en
+ * otra zona ve la grilla corrida un día y marca asistencia en la fecha
+ * equivocada.
+ */
+
+import {
+  addDays,
+  argentinaDate,
+  argentinaParts,
+  daysInMonth,
+  fromISODate,
+  toISODate,
+  weekday,
+  WEEKDAY_NAMES,
+} from "@/lib/timezone"
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 /** Short day labels Mon→Sun (European week) */
@@ -15,91 +37,88 @@ const MONTH_NAMES_SHORT = [
 
 const DAY_SHORT = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"] as const
 
-// JS getDay() → DayOfWeek enum values used in the DB
-const JS_DAY_TO_ENUM = [
-  "SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY",
-] as const
-
 // ─── Date ↔ string ────────────────────────────────────────────────────────────
 
-/** Local date → "YYYY-MM-DD" */
+/** Día argentino → "YYYY-MM-DD" */
 export function toDateStr(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+  return toISODate(d)
 }
 
-/** "YYYY-MM-DD" → local midnight Date */
+/** "YYYY-MM-DD" → medianoche argentina de ese día */
 export function fromDateStr(s: string): Date {
-  const [y, m, d] = s.split("-").map(Number)
-  return new Date(y, m - 1, d)
+  return fromISODate(s)
 }
 
 // ─── Week helpers ─────────────────────────────────────────────────────────────
 
-/** Returns the Monday of the week containing d (local time). */
+/** El lunes de la semana que contiene a d, a medianoche argentina. */
 export function getWeekStart(d: Date): Date {
-  const day = d.getDay() // 0 = Sunday
-  const diff = day === 0 ? -6 : 1 - day
-  const result = new Date(d)
-  result.setDate(d.getDate() + diff)
-  result.setHours(0, 0, 0, 0)
-  return result
+  const { year, month, day } = argentinaParts(d)
+  const dow = weekday(d) // 0 = domingo
+  const diff = dow === 0 ? -6 : 1 - dow
+  return argentinaDate(year, month, day + diff)
 }
 
-/** Returns the Sunday that ends the week starting on weekStart. */
+/** El domingo que cierra la semana que arranca en weekStart. */
 export function getWeekEnd(weekStart: Date): Date {
-  const result = new Date(weekStart)
-  result.setDate(weekStart.getDate() + 6)
-  return result
+  return addDays(weekStart, 6)
 }
 
-/** Returns 7 dates [Mon, Tue, Wed, Thu, Fri, Sat, Sun] starting from weekStart. */
+/** Los 7 días [Lun … Dom] desde weekStart. */
 export function getWeekDays(weekStart: Date): Date[] {
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart)
-    d.setDate(weekStart.getDate() + i)
-    return d
-  })
+  return Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
 }
 
 // ─── Month helpers ────────────────────────────────────────────────────────────
 
+/** El mes argentino al que pertenece d, como [año, mes 0-indexado]. */
+export function getYearMonth(d: Date): [number, number] {
+  const { year, month } = argentinaParts(d)
+  return [year, month - 1]
+}
+
+/** El día 1 del mes argentino al que pertenece d, corrido `months` meses. */
+export function getMonthStart(d: Date, months = 0): Date {
+  const { year, month } = argentinaParts(d)
+  return argentinaDate(year, month + months, 1)
+}
+
+
 /**
- * Returns all cells for a month calendar grid (Mon–Sun columns).
- * Includes padding days from adjacent months. Always 35 or 42 cells.
+ * Celdas de la grilla mensual (columnas Lun–Dom), con el relleno de los meses
+ * vecinos. Siempre 35 o 42 celdas. `month` es 0-indexado, como `getMonth()`.
  */
 export function getMonthCalendarDays(
   year: number,
   month: number,
 ): { date: Date; isCurrentMonth: boolean }[] {
-  const firstDay = new Date(year, month, 1)
-  const lastDay = new Date(year, month + 1, 0)
+  const firstDay = argentinaDate(year, month + 1, 1)
+  const lastDay = argentinaDate(year, month + 1, daysInMonth(year, month + 1))
 
   const gridStart = getWeekStart(firstDay)
   const gridEnd = getWeekEnd(getWeekStart(lastDay))
 
   const days: { date: Date; isCurrentMonth: boolean }[] = []
-  const cursor = new Date(gridStart)
+  let cursor = gridStart
   while (cursor <= gridEnd) {
+    const parts = argentinaParts(cursor)
     days.push({
-      date: new Date(cursor),
-      isCurrentMonth: cursor.getMonth() === month && cursor.getFullYear() === year,
+      date: cursor,
+      isCurrentMonth: parts.month - 1 === month && parts.year === year,
     })
-    cursor.setDate(cursor.getDate() + 1)
+    cursor = addDays(cursor, 1)
   }
   return days
 }
 
 // ─── Comparisons ─────────────────────────────────────────────────────────────
 
+/** true si los dos caen el mismo día argentino. */
 export function isSameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  )
+  return toISODate(a) === toISODate(b)
 }
 
-/** Returns true if a is strictly after b at day granularity. */
+/** true si a es estrictamente posterior a b, a nivel día. */
 export function isAfterDay(a: Date, b: Date): boolean {
   return toDateStr(a) > toDateStr(b)
 }
@@ -108,30 +127,32 @@ export function isAfterDay(a: Date, b: Date): boolean {
 
 type ScheduleInfo = { weekDays: string[]; startTime: string; endTime: string }
 
-/** Returns "HH:MM – HH:MM" for the schedule active on date, or "". */
+/** "HH:MM – HH:MM" del horario activo ese día, o "". */
 export function getScheduleTimeForDay(schedules: ScheduleInfo[], date: Date): string {
-  const dow = JS_DAY_TO_ENUM[date.getDay()]
+  const dow = WEEKDAY_NAMES[weekday(date)]
   const match = schedules.find((s) => s.weekDays.includes(dow))
   return match ? `${match.startTime} – ${match.endTime}` : ""
 }
 
 // ─── Display formatting ───────────────────────────────────────────────────────
 
-/** Format date as "Lun 24 Mar" */
+/** "Lun 24 Mar" */
 export function formatDayLabel(d: Date): string {
-  return `${DAY_SHORT[d.getDay()]} ${d.getDate()} ${MONTH_NAMES_SHORT[d.getMonth()]}`
+  const { month, day } = argentinaParts(d)
+  return `${DAY_SHORT[weekday(d)]} ${day} ${MONTH_NAMES_SHORT[month - 1]}`
 }
 
-/** Format week label as "Semana del 24 Mar" */
+/** "24–30 Mar" / "24 Mar – 2 Abr" */
 export function formatWeekLabel(weekStart: Date): string {
-  const end = getWeekEnd(weekStart)
-  if (weekStart.getMonth() === end.getMonth()) {
-    return `${weekStart.getDate()}–${end.getDate()} ${MONTH_NAMES_SHORT[end.getMonth()]}`
+  const start = argentinaParts(weekStart)
+  const end = argentinaParts(getWeekEnd(weekStart))
+  if (start.month === end.month) {
+    return `${start.day}–${end.day} ${MONTH_NAMES_SHORT[end.month - 1]}`
   }
-  return `${weekStart.getDate()} ${MONTH_NAMES_SHORT[weekStart.getMonth()]} – ${end.getDate()} ${MONTH_NAMES_SHORT[end.getMonth()]}`
+  return `${start.day} ${MONTH_NAMES_SHORT[start.month - 1]} – ${end.day} ${MONTH_NAMES_SHORT[end.month - 1]}`
 }
 
-/** Format month label as "Marzo 2026" */
+/** "Marzo 2026" — `month` 0-indexado. */
 export function formatMonthLabel(year: number, month: number): string {
   return `${MONTH_NAMES[month]} ${year}`
 }
